@@ -1,0 +1,107 @@
+{
+  "skill_name": "python-313-modern-syntax",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "In Python 3.13, I defined a generic class with `class Container[T]:`. A colleague says 'TypeVars from the new syntax don't really exist at runtime — they're only for type checkers.' Is my colleague correct? If I want to access the TypeVar object programmatically, what attribute should I use?",
+      "expected_output": "The colleague is WRONG. TypeVar objects from PEP 695 syntax DO exist at runtime via __type_params__. class Container[T]: creates real TypeVar objects accessible via Container.__type_params__ which is a tuple containing the TypeVar.",
+      "expectations": [
+        "Says colleague is wrong",
+        "Mentions __type_params__ attribute",
+        "States TypeVar objects exist at runtime"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "What's the exact list of 19 stdlib modules removed in Python 3.13 per PEP 594? My friend says asyncore, asynchat, and smtpd were also removed in 3.13, and that crypt was replaced by the 'crypt' package on PyPI.",
+      "expected_output": "The 19 modules are: aifc, audioop, cgi, cgitb, chunk, crypt, imghdr, mailcap, msilib, nis, nntplib, ossaudiodev, pipes, sndhdr, spwd, sunau, telnetlib, uu, xdrlib. asyncore, asynchat, and smtpd were removed in 3.12 (not 3.13). PEP 594 suggests replacements like cryptography, passlib, bcrypt, argon2-cffi for crypt — not a specific PyPI 'crypt' package.",
+      "expectations": [
+        "Lists exactly 19 modules",
+        "Correctly identifies asyncore/asynchat/smtpd as 3.12",
+        "Correctly states crypt replacement options"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Explain what changed with locals() in Python 3.13. Someone told me 'in Python 3.12, mutations to locals() would propagate back to the actual local variables, but in 3.13 that behavior was removed.' Is this accurate?",
+      "expected_output": "No, this is incorrect. Pre-3.13 behavior was never that mutations reliably propagated back — that was always undefined/implementation-specific behavior that broke under debuggers, tracing, or concurrent execution. PEP 667 standardizes that locals() in optimized scopes returns a fresh snapshot dict each time, and mutations NEVER propagate back. frame.f_locals changed from a shared dict to a write-through proxy.",
+      "expectations": [
+        "Says the friend's statement is wrong",
+        "Clarifies mutations never reliably propagated back pre-3.13",
+        "Mentions fresh snapshot dict each call",
+        "Mentions frame.f_locals is now a write-through proxy"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "What's the difference between TypeIs and TypeGuard in Python 3.13? Does TypeIs narrow the type in the negative (else) branch?",
+      "expected_output": "TypeIs narrows in BOTH branches: positive branch narrows to intersection (A ∧ B), negative branch narrows to exclusion (A ∧ ¬B). TypeGuard only narrows in the positive (True) branch — the else branch has NO narrowing. TypeIs also requires the narrowed type B to be a subtype of the input type A; TypeGuard has no such restriction.",
+      "expectations": [
+        "States TypeIs narrows in both branches",
+        "States TypeGuard only narrows in True branch",
+        "Mentions negative branch exclusion semantics for TypeIs",
+        "Mentions TypeIs requires subtype relationship"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "In the type statement (PEP 695), is the right-hand side evaluated eagerly at definition time or lazily on attribute access? Also: what attribute on TypeAliasType holds the lazily-evaluated value?",
+      "expected_output": "The right-hand side is lazily evaluated. TypeAliasType has a __value__ attribute that is evaluated on access, not at definition time. Type parameter bounds are also lazily evaluated — 1/0 in a bound does NOT raise at definition time, only on __bound__ access.",
+      "expectations": [
+        "States lazy evaluation",
+        "Mentions __value__ attribute",
+        "Mentions bounds also lazily evaluated"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "With PEP 696 type parameter defaults, can a TypeVar with a default immediately follow a TypeVarTuple with a default? And what is TypeVar.__default__ when default=None is explicitly passed?",
+      "expected_output": "No — a TypeVar immediately following a TypeVarTuple CANNOT have a default because it would be ambiguous whether type arguments bind to the TypeVarTuple or the defaulted TypeVar. When default=None is passed to TypeVar, __default__ is NoneType (the class), not None (the value).",
+      "expectations": [
+        "Says not allowed (ambiguous ordering)",
+        "States __default__ is NoneType when default=None passed"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "What does sys._is_gil_enabled() return in a regular Python 3.13 build (not free-threaded)? Does it ever return False in that build?",
+      "expected_output": "sys._is_gil_enabled() always returns True in the regular (non-free-threaded) Python build because the GIL is always enabled. It can only return False in a free-threaded build where the GIL has been disabled at runtime. The free-threaded build is not the default — it's a separate executable (python3.13t).",
+      "expectations": [
+        "States always True in regular build",
+        "Mentions free-threaded build can be False",
+        "Clarifies free-threaded is not the default"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Write a minimal example showing typing.ReadOnly on a TypedDict and explain whether it's runtime-enforced or only type-checker enforced.",
+      "expected_output": "typing.ReadOnly marks TypedDict items as read-only. Runtime behavior: NO enforcement — Python allows mutation. Type checkers emit errors. Example: class Movie(TypedDict): title: ReadOnly[str]; m['title'] = 'Matrix' would NOT raise at runtime but type checkers would error.",
+      "expectations": [
+        "Provides correct ReadOnly example",
+        "States NOT runtime enforced, only type checker",
+        "Mentions type checker error on mutation"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "What is the difference between typing.Never and typing.NoReturn? Are they the same type?",
+      "expected_output": "typing.Never and typing.NoReturn are interchangeable at the type system level — both represent the bottom type (no values) and type checkers treat them identically. Convention: NoReturn is used for return annotations of functions that never return; Never is used for general bottom type positions (arguments, variables, assert_never()). Both added: NoReturn in 3.5.2, Never in 3.11.",
+      "expectations": [
+        "States they are interchangeable",
+        "Mentions NoReturn for return annotations",
+        "Mentions Never for general bottom type",
+        "Correct version info"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "How does @warnings.deprecated work with @typing.overload? Which decorator goes first? And what attribute holds the deprecation message?",
+      "expected_output": "@deprecated must be AFTER @overload (so it decorates the overload, not the implementation). The deprecation message is stored in __deprecated__ attribute. Runtime: emits DeprecationWarning on use (calls for functions, instantiation/subclassing for classes). Category defaults to DeprecationWarning; set category=None for type-checker-only warning.",
+      "expectations": [
+        "States @deprecated after @overload",
+        "Mentions __deprecated__ attribute",
+        "Mentions runtime DeprecationWarning behavior"
+      ]
+    }
+  ]
+}

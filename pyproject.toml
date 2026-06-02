@@ -1,0 +1,71 @@
+[project]
+name = "cc-skill-optimizer"
+version = "0.1.0"
+description = "GEPA + DSPy optimizer for Claude Code SKILL.md, CLAUDE.md, and AGENTS.md"
+requires-python = ">=3.13"
+
+dependencies = [
+    # Core optimizers
+    "gepa>=0.1.1",
+    "dspy>=2.6.0",
+
+    # LLM routing (gepa + dspy both use litellm under the hood)
+    "litellm>=1.55.0",
+
+    # Anthropic SDK (for direct API fallback)
+    "anthropic>=0.49.0",
+
+    # Data
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+
+    # Dev utilities
+    "rich>=13.0.0",
+    "typer>=0.15.0",
+]
+
+[project.optional-dependencies]
+judge = [
+    "litellm[proxy]>=1.55.0",
+]
+live = []
+all = [
+    "cc-skill-optimizer[judge]",
+]
+
+# ---- Build ----------------------------------------------------------------
+# Tell hatchling that all importable code lives under src/
+# Without this, hatchling looks for a cc_skill_optimizer/ package at root and fails.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "optimize.py", "watch_and_learn.py", "tests", "skills"]
+
+# ---- Dev dependencies ----------------------------------------------------
+# uv >=0.5 replaced [tool.uv.dev-dependencies] with PEP 735 dependency-groups.
+# The old field still works but emits a deprecation warning; this silences it.
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.9.0",
+    "ty>=0.0.1a8",
+]
+
+# ---- Tool config ----------------------------------------------------------
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
