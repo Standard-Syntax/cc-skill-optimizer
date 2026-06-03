@@ -41,6 +41,13 @@ from typing import Any
 
 DEFAULT_CLAUDE_DIR = Path.home() / ".claude"
 
+# Positive completion signals for conservative outcome inference
+POSITIVE_COMPLETION_SIGNALS = (
+    "done", "complete", "completed", "finished", "success", "succeeded",
+    "✓", "implemented", "created", "added", "fixed", "wrote", "updated",
+    "all set", "shipped", "ready", "passed", "deployed",
+)
+
 
 def iter_session_files(
     claude_dir: Path = DEFAULT_CLAUDE_DIR,
@@ -333,18 +340,20 @@ def parse_session(path: Path) -> dict:
                     }
                 )
 
-    # Infer outcome if not already set
+    # Infer outcome if not already set (conservative — require positive completion signal)
     if outcome == "unknown":
         if error_messages:
             outcome = "error"
         elif assistant_texts:
-            last = assistant_texts[-1].lower()
-            if any(w in last for w in ("done", "complete", "finished", "success", "✓")):
+            last_msg = assistant_texts[-1].lower()
+            if any(signal in last_msg for signal in POSITIVE_COMPLETION_SIGNALS):
                 outcome = "success"
-            elif any(w in last for w in ("error", "failed", "cannot", "sorry")):
+            elif any(w in last_msg for w in ("error", "failed", "cannot", "sorry")):
                 outcome = "error"
             else:
-                outcome = "success"  # conservative: if no errors, assume success
+                outcome = "unknown"  # no positive signal → ambiguous
+        else:
+            outcome = "unknown"
 
     duration_s: float | None = None
     if len(timestamps) >= 2:

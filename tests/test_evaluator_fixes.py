@@ -334,5 +334,64 @@ def test_all_patterns_accounted_for():
     assert len(se._COMPILED_SPECIFICITY) == 7
 
 
+# =======================================================================
+# Identity test: _parse_llm_json is the same function across modules
+# =======================================================================
+
+
+def test_parse_llm_json_is_same_function():
+    """Verify both evaluator modules import the same _parse_llm_json from utils."""
+    import utils
+
+    assert se._parse_llm_json is ev._parse_llm_json
+    assert se._parse_llm_json is utils._parse_llm_json
+
+
+# =======================================================================
+# Feedback synthesis tests
+# =======================================================================
+
+
+class TestFeedbackSynthesisEvaluator:
+    """Tests for evaluator._build_feedback"""
+
+    def test_error_outcome_includes_error_details(self):
+        episode = {"outcome": "error"}
+        side_info = {
+            "n_tool_calls": 3,
+            "compaction": False,
+            "error_messages": ["FileNotFoundError", "Timeout"],
+        }
+        fb = ev._build_feedback(episode, side_info)
+        assert "errors" in fb.lower()
+        assert "FileNotFoundError" in fb
+
+    def test_excessive_tool_calls_detected(self):
+        episode = {"outcome": "success"}
+        side_info = {"n_tool_calls": 30, "compaction": False}
+        fb = ev._build_feedback(episode, side_info)
+        assert "Excessive tool calls" in fb
+        assert "30" in fb
+
+    def test_compaction_flagged(self):
+        episode = {"outcome": "success"}
+        side_info = {"n_tool_calls": 10, "compaction": True}
+        fb = ev._build_feedback(episode, side_info)
+        assert "compaction" in fb.lower()
+
+    def test_interrupted_outcome_notes_session_end(self):
+        episode = {"outcome": "interrupted"}
+        side_info = {"n_tool_calls": 5, "compaction": False}
+        fb = ev._build_feedback(episode, side_info)
+        assert "ended" in fb.lower() or "interrupted" in fb.lower()
+
+    def test_success_with_minimal_tools_generic_feedback(self):
+        episode = {"outcome": "success"}
+        side_info = {"n_tool_calls": 3, "compaction": False}
+        fb = ev._build_feedback(episode, side_info)
+        assert fb  # non-empty
+        assert "errors" not in fb.lower()  # no error mentioned
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -7,12 +7,19 @@ Verifies:
 3. _header section is NOT affected (it still retains level-1 headings correctly)
 """
 
-import pytest
-import re
 import sys
 
+import pytest
+
 sys.path.insert(0, "src")
-from section_parser import parse_sections, merge_sections
+from section_parser import (
+    build_section_tree,
+    find_section,
+    load_sections_from_file,
+    merge_sections,
+    parse_sections,
+    save_sections_to_file,
+)
 
 
 class TestIdempotency:
@@ -102,6 +109,9 @@ This is commands content.
         # Section content should not start with ##
         for key, content in sections.items():
             if key in ("_header", "_section_order"):
+                continue
+            # Skip heading metadata keys (e.g. _section_overview_heading)
+            if key.startswith("_") and key.endswith("_heading"):
                 continue
             if content.strip():  # Only check non-empty sections
                 first_line = content.split("\n")[0]
@@ -248,6 +258,160 @@ Child2 content.
         merged2 = merge_sections(sections2, max_depth=2)
 
         assert merged1 == merged2
+
+
+class TestHeadingCasingPreservation:
+    """Test that non-standard heading casing is preserved through round-trips."""
+
+    def test_non_standard_casing_preserved(self):
+        """Headings like '## SQL Server 2016 Quirks' should not become title-cased."""
+        text = """\
+# My Project
+
+## SQL Server 2016 Quirks
+Some content about SQL Server 2016 quirks.
+
+## iOS App Development
+Some iOS content.
+"""
+        sections = parse_sections(text, max_depth=2)
+        merged = merge_sections(sections, max_depth=2)
+
+        # SQL Server 2016 Quirks should NOT become "Sql Server 2016 Quirks"
+        assert "## SQL Server 2016 Quirks" in merged
+        # iOS should NOT become "Ios"
+        assert "## iOS App Development" in merged
+
+    def test_all_caps_acronym_preserved(self):
+        """All-caps sections like '## API' should not become '## Api'."""
+        text = """\
+## API
+API reference content.
+
+## REST
+REST API details.
+"""
+        sections = parse_sections(text, max_depth=2)
+        merged = merge_sections(sections, max_depth=2)
+
+        assert "## API" in merged
+        assert "## REST" in merged
+
+    def test_mixed_case_round_trip_idempotent(self):
+        """Documents with mixed casing should be fully idempotent."""
+        text = """\
+## SQL Server 2016 Quirks
+Quirk content here.
+
+## iOS App Development
+iOS content here.
+
+## API
+API reference.
+"""
+        sections1 = parse_sections(text, max_depth=2)
+        merged1 = merge_sections(sections1, max_depth=2)
+        sections2 = parse_sections(merged1, max_depth=2)
+        merged2 = merge_sections(sections2, max_depth=2)
+
+        assert merged1 == merged2
+
+    def test_stored_heading_metadata_excluded_from_content(self):
+        """Stored heading metadata should not appear in content sections."""
+        text = """\
+## Overview
+Overview content.
+"""
+        sections = parse_sections(text, max_depth=2)
+
+        # Check that heading metadata exists but is NOT in the content
+        heading_key = "_section_overview_heading"
+        assert heading_key in sections, "Heading metadata should be stored"
+        assert sections[heading_key].rstrip() == "## Overview"
+
+        # The actual content should not contain the heading
+        assert "## Overview" not in sections.get("section_overview", "")
+
+
+class TestFindSectionModuleLevel:
+    """Test that find_section works at module level."""
+
+    def test_find_section_module_level(self):
+        """find_section should be accessible as a module-level function."""
+        text = """\
+## Overview
+Overview content.
+
+## Commands
+Commands content.
+
+### Build
+Build steps.
+"""
+        tree = build_section_tree(text, max_depth=2)
+
+        # find_section should work on the tree
+        overview_section = find_section(tree, "section_overview")
+        assert overview_section is not None
+        assert overview_section.name == "section_overview"
+
+        commands_section = find_section(tree, "section_commands")
+        assert commands_section is not None
+
+        # find_section should work for subsections too
+        build_section = find_section(tree, "section_commands.subsection_build")
+        assert build_section is not None
+        assert build_section.name == "section_commands.subsection_build"
+
+    def test_find_section_returns_none_for_missing(self):
+        """find_section should return None when section is not found."""
+        text = """\
+## Overview
+Overview content.
+"""
+        tree = build_section_tree(text, max_depth=2)
+
+        result = find_section(tree, "section_nonexistent")
+        assert result is None
+
+    def test_find_section_not_closure_bound(self):
+        """find_section at module level should not depend on build_section_tree call."""
+        # This verifies the function is truly hoisted to module level
+        # by calling it without ever calling build_section_tree
+        import section_parser
+
+        # find_section should exist as a module-level attribute on the module
+        assert hasattr(section_parser, "find_section")
+        assert callable(section_parser.find_section)
+        assert callable(section_parser.find_section)
+
+
+class TestFileSaveHeadingPreservation:
+    """Verify save_sections_to_file preserves heading casing (file-based round-trip)."""
+
+    def test_sql_server_heading_survives_file_save(self, tmp_path):
+        # Write a file with non-standard casing
+        original = """# Project
+
+## SQL Server 2016 Quirks
+
+Some content.
+
+## Commands
+
+Run uv commands.
+"""
+        path = tmp_path / "SKILL.md"
+        path.write_text(original, encoding="utf-8")
+
+        # Round-trip through save_sections_to_file
+        sections = load_sections_from_file(path, max_depth=2)
+        save_sections_to_file(sections, path, max_depth=2)
+
+        # Read back
+        result = path.read_text(encoding="utf-8")
+        assert "## SQL Server 2016 Quirks" in result
+        assert "## Sql Server 2016 Quirks" not in result, f"Casing drift detected:\n{result}"
 
 
 if __name__ == "__main__":

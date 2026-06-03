@@ -130,26 +130,63 @@ from pathlib import Path
 # Ensure WARNING level logging is enabled for the module
 logging.basicConfig(level=logging.WARNING)
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-import llm_config  # noqa: F401 — side-effect: sets env vars for all LiteLLM calls
-from evaluator import make_replay_evaluator
-from llm_config import (
-    DEFAULT_MODEL,
-    REFLECTION_MODEL,
-)
-from parse_session import DEFAULT_CLAUDE_DIR, build_corpus
-from section_parser import (
-    load_sections_from_file,
-    merge_sections,
-)
-from synthetic_evaluator import (
-    generate_tasks_for_domain,
-    load_task_library,
-    make_dspy_synthetic_pipeline,
-    make_synthetic_evaluator,
-)
+# Imports — handle both "python optimize.py" (from project root) and "python -m optimize" (from src/ dir)
+try:
+    from src.evaluator import make_replay_evaluator  # type: ignore
+    from src.llm_config import (  # type: ignore
+        DEFAULT_MODEL,
+        DIRECT_OUTPUT_PREFIX,
+        EVAL_MAX_TOKENS,
+        INFERENCE_PARAMS,
+        REFLECTION_MODEL,
+        THINKING_CONFIG_REFLECTION,
+    )
+    from src.parse_session import DEFAULT_CLAUDE_DIR, build_corpus  # type: ignore
+    from src.section_parser import (  # type: ignore
+        build_section_tree,
+        load_sections_from_file,
+        merge_sections,
+        parse_sections,
+        save_sections_to_file,
+    )
+    from src.synthetic_evaluator import (  # type: ignore
+        generate_tasks_for_domain,
+        judge_score_task,
+        load_task_library,
+        make_dspy_synthetic_pipeline,
+        make_synthetic_evaluator,
+    )
+except ImportError:
+    # Fallback: add src/ to sys.path so internal module imports (e.g. utils in evaluator)
+    # resolve correctly, then retry with bare module names
+    _src_path = str(Path(__file__).parent / "src")
+    if _src_path not in sys.path:
+        sys.path.insert(0, _src_path)
+    import llm_config  # noqa: F401 — side-effect: sets env vars for all LiteLLM calls
+    from evaluator import make_replay_evaluator  # noqa: F401
+    from llm_config import (  # noqa: F401
+        DEFAULT_MODEL,
+        DIRECT_OUTPUT_PREFIX,
+        EVAL_MAX_TOKENS,
+        INFERENCE_PARAMS,
+        REFLECTION_MODEL,
+        THINKING_CONFIG_REFLECTION,
+    )
+    from parse_session import DEFAULT_CLAUDE_DIR, build_corpus  # noqa: F401
+    from section_parser import (  # noqa: F401
+        build_section_tree,
+        load_sections_from_file,
+        merge_sections,
+        parse_sections,
+        save_sections_to_file,
+    )
+    from synthetic_evaluator import (  # noqa: F401
+        generate_tasks_for_domain,
+        judge_score_task,
+        load_task_library,
+        make_dspy_synthetic_pipeline,
+        make_synthetic_evaluator,
+    )
 
 # ---------------------------------------------------------------------------
 # Dataset helpers
@@ -338,6 +375,25 @@ SEED_BY_TARGET: dict[str, str] = {
     "sections": SEED_SKILL_MD,
     "nested": SEED_CLAUDE_MD,
 }
+
+
+# ---------------------------------------------------------------------------
+# GEPA tuning constants (used by run_gepa_optimize_anything and run_gepa_synthetic)
+# ---------------------------------------------------------------------------
+
+# Number of threads for parallel metric evaluation.
+# Conservative default to respect MiniMax/MiniMax API rate limits.
+GEPA_NUM_THREADS_DEFAULT: int = 4
+
+# Reflection minibatch sizes — how many low-scoring episodes the reflection LM
+# sees per mutation proposal. Larger = stronger signal but slower per iteration.
+# Replay path: 50+ episode corpus → 5 spans failure modes well.
+# Synthetic path: 20-task library → 4 is enough without exhausting the library.
+GEPA_REFLECTION_MINIBATCH_REPLAY: int = 5
+GEPA_REFLECTION_MINIBATCH_SYNTHETIC: int = 4
+
+# Cache evaluation results across GEPA iterations for the same candidate.
+GEPA_CACHE_EVALUATION: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +793,8 @@ def run_gepa_optimize_anything(
     sections_seed_file: Path | None = None,
     is_nested: bool = False,
     nested_root: Path | None = None,
+    frontier_type: str = "instance",
+    max_evals_override: int | None = None,
 ) -> str | dict[str, str]:
     """
     Run gepa.optimize_anything and return the best candidate.
@@ -793,14 +851,17 @@ def run_gepa_optimize_anything(
         background=background,
         config=GEPAConfig(
             engine=EngineConfig(
-                max_metric_calls=max_metric_calls,
+                max_metric_calls=max_evals_override if max_evals_override is not None else max_metric_calls,
                 cache_evaluation=True,
-                parallel=False,
-                frontier_type="instance",
+                parallel=True,  # Replay evaluator is stateless → parallelise metric evaluation across episodes.
+                max_workers=GEPA_NUM_THREADS_DEFAULT,
+                frontier_type=frontier_type,
             ),
             reflection=ReflectionConfig(
                 reflection_lm=reflection_lm,
-                reflection_minibatch_size=3,
+                # Replay path: 50+ episode corpus → 5 spans failure modes well;
+                # smaller minibatch would miss rare-but-important failure patterns.
+                reflection_minibatch_size=GEPA_REFLECTION_MINIBATCH_REPLAY,
             ),
         ),
     )
@@ -1024,6 +1085,8 @@ def run_gepa_synthetic(
     is_sections: bool = False,
     is_nested: bool = False,
     nested_root: Path | None = None,
+    frontier_type: str = "instance",
+    max_evals_override: int | None = None,
 ) -> str | dict[str, str]:
     """Run gepa.optimize_anything with synthetic task-based evaluation."""
     from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, optimize_anything
@@ -1066,13 +1129,16 @@ def run_gepa_synthetic(
         background=background,
         config=GEPAConfig(
             engine=EngineConfig(
-                max_metric_calls=max_metric_calls,
+                max_metric_calls=max_evals_override if max_evals_override is not None else max_metric_calls,
                 cache_evaluation=True,
-                frontier_type="instance",
+                parallel=True,  # Synthetic evaluator is stateless → parallelise metric evaluation across tasks.
+                max_workers=GEPA_NUM_THREADS_DEFAULT,
+                frontier_type=frontier_type,
             ),
             reflection=ReflectionConfig(
                 reflection_lm=reflection_lm,
-                reflection_minibatch_size=3,
+                # Synthetic path: 20-task library → 4 is enough without exhausting the library.
+                reflection_minibatch_size=GEPA_REFLECTION_MINIBATCH_SYNTHETIC,
             ),
         ),
     )
@@ -1256,17 +1322,33 @@ def main() -> None:
         help="Use LLM judge in session mode (ignored in --no-sessions, always uses judge)",
     )
     ap.add_argument("--judge-lm", default=DEFAULT_MODEL)
+    ap.add_argument(
+        "--phase",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="Optimization phase: 1 (synthetic exploration, instance frontier, 100 evals) or 2 (session-backed refinement, population frontier, 60 evals). Default: 1",
+    )
 
     # Output
     ap.add_argument("--output-dir", default="outputs/")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
+    # Phase-based GEPA configuration
+    if args.phase == 1:
+        _gepa_frontier_type = "instance"
+        _gepa_default_max_evals = 100
+    else:  # phase 2
+        _gepa_frontier_type = "population"
+        _gepa_default_max_evals = 60
+
     # ------------------------------------------------------------------ #
     # Load seed — multi-target uses a dict from --skill-dir,
     # single targets use a string from --seed-file
     # ------------------------------------------------------------------ #
     skill_dir: Path | None = None
+    nested_root: Path | None = None
     seed_candidate: str | dict[str, str]
 
     if args.target == "multi":
@@ -1413,6 +1495,8 @@ def main() -> None:
                 is_sections=(args.target == "sections"),
                 is_nested=(args.target == "nested"),
                 nested_root=nested_root,
+                frontier_type=_gepa_frontier_type,
+                max_evals_override=_gepa_default_max_evals,
             )
 
     else:
@@ -1486,6 +1570,8 @@ def main() -> None:
                 sections_seed_file=Path(args.seed_file) if args.seed_file else None,
                 is_nested=(args.target == "nested"),
                 nested_root=Path(args.nested_root) if args.nested_root else None,
+                frontier_type=_gepa_frontier_type,
+                max_evals_override=_gepa_default_max_evals,
             )
 
     print("\n" + "=" * 60)

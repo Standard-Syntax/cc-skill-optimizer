@@ -151,6 +151,9 @@ def parse_sections(
             if current_key:
                 flush_lines = current_lines[1:] if current_lines else current_lines
                 _flush(current_key, flush_lines)
+                # Store raw heading for idempotent round-trip (preserves casing)
+                if current_lines:
+                    sections[f"_{current_key}_heading"] = current_lines[0]
 
             # Find parent in stack
             while section_stack and section_stack[-1][0] >= level:
@@ -175,6 +178,9 @@ def parse_sections(
     if current_key:
         flush_lines = current_lines[1:] if current_lines else current_lines
         _flush(current_key, flush_lines)
+        # Store raw heading for idempotent round-trip (preserves casing)
+        if current_lines:
+            sections[f"_{current_key}_heading"] = current_lines[0]
 
     # Attach section_order metadata for merge_sections
     sections["_section_order"] = "\t".join(section_order)
@@ -212,8 +218,10 @@ def merge_sections(
     section_order_raw = sections.get("_section_order", "")
     section_order = section_order_raw.split("\t") if section_order_raw else []
 
-    # Separate metadata keys
+    # Separate metadata keys (including stored raw headings)
     meta_keys = {"_header", "_section_order"}
+    heading_keys = {k for k in sections if k.startswith("_") and k.endswith("_heading")}
+    meta_keys |= heading_keys
     content_keys = [k for k in sections if k not in meta_keys]
 
     parts = [header] if header else []
@@ -256,15 +264,20 @@ def merge_sections(
         depth = key.count(".") + 1  # section_* = h2, section_*.subsection_* = h3
         heading_depth = min(depth + 1, 6)  # +1 because section_* starts at h2
 
-        # Extract heading from content if present (first line is the heading)
-        lines = content.splitlines(keepends=True)
-        if lines and re.match(r"^#{1,6}\s+", lines[0]):
-            # Content already has heading — use as-is
-            parts.append(content)
+        # Check for stored raw heading (preserves original casing)
+        stored_heading = sections.get(f"_{key}_heading")
+        if stored_heading:
+            parts.append(f"{stored_heading.rstrip()}\n{content}")
         else:
-            # Reconstruct heading from key name
-            heading_text = _key_to_heading(key)
-            parts.append(f"{'#' * heading_depth} {heading_text}\n{content}")
+            # Extract heading from content if present (first line is the heading)
+            lines = content.splitlines(keepends=True)
+            if lines and re.match(r"^#{1,6}\s+", lines[0]):
+                # Content already has heading — use as-is
+                parts.append(content)
+            else:
+                # Reconstruct heading from key name
+                heading_text = _key_to_heading(key)
+                parts.append(f"{'#' * heading_depth} {heading_text}\n{content}")
 
     result = "\n\n".join(p for p in parts if p.strip())
     return result
@@ -287,6 +300,21 @@ def _key_to_heading(key: str) -> str:
 # ---------------------------------------------------------------------------
 # Tree representation (for debugging / visualization)
 # ---------------------------------------------------------------------------
+
+
+def find_section(sections: list[Section], name: str) -> Section | None:
+    """
+    Recursively find a section by name in a tree of sections.
+
+    Exposed at module level for external use.
+    """
+    for s in sections:
+        if s.name == name:
+            return s
+        found = find_section(s.children, name)
+        if found:
+            return found
+    return None
 
 
 def build_section_tree(text: str, max_depth: int = 2) -> list[Section]:
@@ -343,16 +371,6 @@ def build_section_tree(text: str, max_depth: int = 2) -> list[Section]:
                 stack.pop()
             current = stack[-1] if stack else None
             if current:
-                # Find the section by name in the tree
-                def find_section(sections: list[Section], name: str) -> Section | None:
-                    for s in sections:
-                        if s.name == name:
-                            return s
-                        found = find_section(s.children, name)
-                        if found:
-                            return found
-                    return None
-
                 current = find_section(
                     root, _normalize_key(heading, stack[-1].name if stack else "")
                 )
@@ -381,10 +399,9 @@ def load_sections_from_file(path: Path, max_depth: int = 2) -> dict[str, str]:
 
 def save_sections_to_file(sections: dict[str, str], path: Path, max_depth: int = 2) -> None:
     """Reassemble sections and write back to a file."""
-    # Strip metadata keys before saving
-    clean = {k: v for k, v in sections.items() if k not in ("_header", "_section_order")}
+    # Pass all sections to merge_sections — it handles metadata exclusion internally
     original = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
-    merged = merge_sections(clean, source_text=original, max_depth=max_depth)
+    merged = merge_sections(sections, source_text=original, max_depth=max_depth)
     path.write_text(merged, encoding="utf-8")
 
 
@@ -396,6 +413,7 @@ def save_sections_to_file(sections: dict[str, str], path: Path, max_depth: int =
 def section_summary(sections: dict[str, str]) -> str:
     """Human-readable summary of parsed sections."""
     meta_keys = {"_header", "_section_order"}
+    meta_keys |= {k for k in sections if k.startswith("_") and k.endswith("_heading")}
     lines = ["Parsed sections:"]
     for key, content in sorted(sections.items()):
         if key in meta_keys:

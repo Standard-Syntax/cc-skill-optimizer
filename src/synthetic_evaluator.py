@@ -60,7 +60,6 @@ Usage in optimize_anything
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -81,6 +80,8 @@ except ImportError:
     EVAL_MAX_TOKENS = 512
     THINKING_CONFIG_EVAL = {"type": "disabled"}
     DIRECT_OUTPUT_PREFIX = "Respond directly and concisely. Output only what is requested."
+
+from utils import _parse_llm_json
 
 # ---------------------------------------------------------------------------
 # Built-in task libraries
@@ -554,15 +555,6 @@ _SPECIFICITY_PATTERNS = [
 _COMPILED_SPECIFICITY = [re.compile(p) for p in _SPECIFICITY_PATTERNS]
 
 
-def _parse_llm_json(raw: str, default: dict | list) -> dict | list:
-    """Strip markdown code fences and parse LLM JSON response."""
-    raw = re.sub(r"```json|```", "", raw).strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return default
-
-
 def structural_score(candidate: str) -> tuple[float, dict]:
     """
     Score a skill candidate using fast structural heuristics.
@@ -826,6 +818,29 @@ def make_synthetic_evaluator(
             "candidate_preview": candidate[:300],
             **j_info,
         }
+
+        # Build feedback for GEPA reflection LM
+        if use_judge and j_info:
+            j_reasoning = j_info.get("reasoning", "")
+            j_gaps = j_info.get("gaps", [])
+            parts = [f"Score {final:.2f}. Structural: {struct_score:.2f}."]
+            if j_reasoning:
+                parts.append(f"Judge: {j_reasoning[:200]}")
+            if j_gaps:
+                gaps_text = "; ".join(j_gaps[:3])[:200]
+                parts.append(f"Gaps identified: {gaps_text}")
+            side_info["feedback"] = " ".join(parts)
+        else:
+            # No judge — feedback from structural score alone
+            if struct_breakdown:
+                missing = [name for name, score in struct_breakdown.items() if score == 0.0 and name.startswith("section_")]
+                if missing:
+                    side_info["feedback"] = f"Structural score {struct_score:.2f}. Missing sections: {', '.join(missing[:3])}."
+                else:
+                    side_info["feedback"] = f"Structural score {struct_score:.2f}. No specific gaps detected."
+            else:
+                side_info["feedback"] = f"Score {final:.2f}. No specific feedback available."
+
         return final, side_info
 
     return evaluate
@@ -852,9 +867,11 @@ def make_dspy_synthetic_pipeline(
                → finds few-shot demos showing good skill content per task type
                → fast, cheap, sets a solid baseline
 
-      Stage 2: dspy.GEPA on top of the bootstrapped program
-               → reflective evolution using LLM-as-judge as the metric
-               → more expensive but finds non-obvious improvements
+      Stage 2: MIPROv2 on top of the bootstrapped program
+               → prompt proposal optimization using the metric as a scalar score
+               → MIPROv2 is used (not dspy.GEPA) because the metric returns a flat float;
+                 dspy.GEPA would require a dspy.Prediction(score, feedback) to drive
+                 its reflection loop, which would need a richer signal than we have here.
 
     Returns the best skill string found.
     """

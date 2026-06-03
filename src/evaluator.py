@@ -30,8 +30,6 @@ they are intentionally omitted from INFERENCE_PARAMS.
 
 from __future__ import annotations
 
-import json
-import re
 import subprocess
 import time
 from pathlib import Path
@@ -59,14 +57,40 @@ except ImportError:
 # Scoring utilities
 # ---------------------------------------------------------------------------
 
+from utils import _parse_llm_json
 
-def _parse_llm_json(raw: str, default: dict | list) -> dict | list:
-    """Strip markdown code fences and parse LLM JSON response."""
-    raw = re.sub(r"```json|```", "", raw).strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return default
+# Default thresholds for _efficiency_bonus (configurable via make_replay_evaluator)
+DEFAULT_TOOL_CALL_THRESHOLDS = {
+    "low_max": 5,
+    "medium_max": 12,
+    "high_min": 25,
+    "extreme_min": 40,
+    "low_bonus": 0.08,
+    "medium_bonus": 0.04,
+    "high_penalty": 0.05,
+    "extreme_penalty": 0.10,
+}
+
+
+def _build_feedback(episode: dict, side_info: dict) -> str:
+    """Synthesize a 1-3 sentence feedback string for the GEPA reflection LM."""
+    parts: list[str] = []
+    outcome = episode.get("outcome", "unknown")
+    errs = side_info.get("error_messages", [])
+    n_tools = side_info.get("n_tool_calls", 0)
+    compaction = side_info.get("compaction", False)
+
+    if outcome == "error" and errs:
+        parts.append(f"Agent hit errors: {'; '.join(errs[:2])}")
+    if n_tools >= 25:
+        parts.append(f"Excessive tool calls ({n_tools}); skill lacks shortcuts or pointer for direct path.")
+    if compaction:
+        parts.append("Context compaction hit during the session — skill may be too verbose or omit key pointers.")
+    if outcome == "interrupted":
+        parts.append("Session ended before agent completed; review whether the skill guided the agent to a clear stopping point.")
+    if not parts:
+        parts.append(f"Outcome: {outcome}. No specific failure detected.")
+    return " ".join(parts)
 
 
 def _outcome_score(episode: dict) -> float:
@@ -80,21 +104,22 @@ def _outcome_score(episode: dict) -> float:
     return mapping.get(episode.get("outcome", "unknown"), 0.5)
 
 
-def _efficiency_bonus(episode: dict) -> float:
+def _efficiency_bonus(episode: dict, thresholds: dict | None = None) -> float:
     """
-    Reward fewer tool calls and shorter duration.
+    Reward fewer tool calls and shorter duration. Thresholds are configurable.
     Returns a delta in [-0.15, +0.15].
     """
+    t = thresholds or DEFAULT_TOOL_CALL_THRESHOLDS
     bonus = 0.0
     n_tools = len(episode.get("tool_calls", []))
-    if n_tools <= 5:
-        bonus += 0.08
-    elif n_tools <= 12:
-        bonus += 0.04
-    elif n_tools >= 40:
-        bonus -= 0.10
-    elif n_tools >= 25:
-        bonus -= 0.05
+    if n_tools <= t["low_max"]:
+        bonus += t["low_bonus"]
+    elif n_tools <= t["medium_max"]:
+        bonus += t["medium_bonus"]
+    elif n_tools >= t["extreme_min"]:
+        bonus -= t["extreme_penalty"]
+    elif n_tools >= t["high_min"]:
+        bonus -= t["high_penalty"]
 
     dur = episode.get("duration_s")
     if dur is not None:
@@ -116,16 +141,16 @@ def _cache_bonus(episode: dict) -> float:
     if total_input == 0:
         return 0.0
     ratio = cache_read / total_input
-    return min(0.05, ratio * 0.10)
+    return min(0.10, ratio * 0.10)
 
 
-def score_episode(episode: dict) -> tuple[float, dict]:
+def score_episode(episode: dict, thresholds: dict | None = None) -> tuple[float, dict]:
     """
     Score a single episode without an LLM judge.
     Returns (score ∈ [0,1], side_info dict).
     """
     base = _outcome_score(episode)
-    eff = _efficiency_bonus(episode)
+    eff = _efficiency_bonus(episode, thresholds)
     cache = _cache_bonus(episode)
     score = max(0.0, min(1.0, base + eff + cache))
 
@@ -143,6 +168,7 @@ def score_episode(episode: dict) -> tuple[float, dict]:
         "task_prompt": episode.get("task_prompt", "")[:200],
         "final_assistant_msg": (episode.get("assistant_text") or [""])[-1][:400],
     }
+    side_info["feedback"] = _build_feedback(episode, side_info)
     return score, side_info
 
 
@@ -214,6 +240,7 @@ def make_replay_evaluator(
     use_llm_judge: bool = False,
     judge_lm: str = "anthropic/claude-haiku-4-5-20251001",
     judge_weight: float = 0.4,
+    tool_call_thresholds: dict | None = None,
 ):
     """
     Returns a GEPA-compatible evaluate(candidate, example) function.
@@ -221,16 +248,22 @@ def make_replay_evaluator(
     candidate: str  — the skill/CLAUDE.md content being optimized
     example:   dict — one episode from the corpus (from dataset= arg to optimize_anything)
     """
+    thresholds = tool_call_thresholds or DEFAULT_TOOL_CALL_THRESHOLDS
 
     def evaluate(candidate: str, example: dict) -> tuple[float, dict]:
         # Heuristic score (fast, free)
-        heuristic_score, side_info = score_episode(example)
+        heuristic_score, side_info = score_episode(example, thresholds)
 
         if use_llm_judge:
             judge_score, reasoning = llm_judge_score(candidate, example, judge_lm)
             final_score = (1 - judge_weight) * heuristic_score + judge_weight * judge_score
             side_info["judge_score"] = judge_score
             side_info["judge_reasoning"] = reasoning
+            # Enrich feedback with judge reasoning
+            judge_reasoning = side_info.get("judge_reasoning", "")
+            if judge_reasoning:
+                existing = side_info.get("feedback", "")
+                side_info["feedback"] = f"{existing} Judge: {judge_reasoning[:200]}" if existing else f"Judge: {judge_reasoning[:200]}"
         else:
             final_score = heuristic_score
 
@@ -252,6 +285,7 @@ def make_live_evaluator(
     skill_slot_path: Path,
     timeout: int = 300,
     test_commands: list[str] | None = None,
+    tool_call_thresholds: dict | None = None,
 ):
     """
     Write candidate skill to disk, run claude on a task, parse the resulting
@@ -263,8 +297,11 @@ def make_live_evaluator(
         timeout:         Max seconds per claude invocation.
         test_commands:   Shell commands to run after claude for pass/fail signal.
                          e.g. ["pytest tests/ -q --tb=no"]
+        tool_call_thresholds: Optional dict of thresholds for _efficiency_bonus.
     """
     from parse_session import parse_session
+
+    thresholds = tool_call_thresholds or DEFAULT_TOOL_CALL_THRESHOLDS
 
     def evaluate(candidate: str, example: dict) -> tuple[float, dict]:
         task_prompt = example.get("task_prompt", "")
@@ -334,11 +371,11 @@ def make_live_evaluator(
         elif test_pass is False:
             base_score = 0.0
         elif episode:
-            base_score, _ = score_episode(episode)
+            base_score, _ = score_episode(episode, thresholds)
         else:
             base_score = 0.5 if returncode == 0 else 0.1
 
-        eff = _efficiency_bonus(episode) if episode else 0.0
+        eff = _efficiency_bonus(episode, thresholds) if episode else 0.0
         score = max(0.0, min(1.0, base_score + eff))
 
         side_info = {

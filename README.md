@@ -48,9 +48,14 @@ uv run python optimize.py \
     --seed-file skills/banking-analytics-seed.md \
     --project-filter banking \
     --max-evals 150 \
+    --phase 1 \
     --reflection-lm anthropic/claude-sonnet-4-6 \
     --output-dir outputs/
 ```
+
+**Phases:**
+- `--phase 1` (default): Synthetic exploration mode, 100 evals, 4-thread parallel evaluation
+- `--phase 2`: Session-backed refinement, 60 evals, requires existing session logs
 
 The optimized file lands at `outputs/skill/best_candidate.md`.
 Copy it to `.claude/skills/banking/SKILL.md` in your project.
@@ -216,6 +221,8 @@ Uses `gepa.optimize_anything` (Generalization mode):
 4. **Mutate** — generate improved SKILL.md informed by all accumulated lessons
 5. **Accept** — update Pareto front if improved
 
+**Parallel evaluation** is enabled by default (4 threads for GEPA, 4 workers for evaluator batch). Phase 1 uses synthetic exploration, Phase 2 uses session-backed refinement.
+
 The ASI passed to the reflection LM includes:
 - Task prompt
 - Outcome + duration
@@ -338,7 +345,20 @@ def my_evaluate(candidate: str, example: dict) -> tuple[float, dict]:
 
 ---
 
-## Citation
+## Changelog
+
+### Phase 1 (2026-06)
+
+- Added `--phase` flag to `optimize.py`:
+  - `--phase 1` (default): Synthetic exploration, 100 evals, parallel evaluation (4 threads)
+  - `--phase 2`: Session-backed refinement, 60 evals (requires session logs)
+- Performance improvements: Parallel GEPA evaluation (`parallel=True`, 4 threads), parallel worker pool for evaluator
+- New `src/utils.py` module with shared helper functions
+- GEPA evaluators now populate `side_info["feedback"]` with diagnostic strings
+- New module-level constants: `GEPA_NUM_THREADS_DEFAULT`, minibatch sizes, caching flags
+- Evaluators now accept `tool_call_thresholds` kwarg for customization
+
+### Earlier Versions
 
 If you use this in research:
 
