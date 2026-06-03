@@ -119,7 +119,9 @@ def run_with_mock_monkeypatch(monkeypatch, mock_program, task_lib, seed, out_dir
         return mock_program
 
     monkeypatch.setattr(RealDSPy, "LM", mock.MagicMock())
-    monkeypatch.setattr(RealDSPy.teleprompt, "MIPROv2", mock.MagicMock())
+    monkeypatch.setattr(RealDSPy, "MIPROv2", mock.MagicMock())  # dspy 3.x top-level
+    monkeypatch.setattr(RealDSPy.teleprompt, "MIPROv2", mock.MagicMock())  # legacy
+    RealDSPy.MIPROv2.return_value.compile = mock_compile_fn
     RealDSPy.teleprompt.MIPROv2.return_value.compile = mock_compile_fn
 
     from synthetic_evaluator import make_dspy_synthetic_pipeline
@@ -189,7 +191,9 @@ def test_extraction_falls_back_when_signature_missing(
         return mock_program
 
     monkeypatch.setattr(RealDSPy, "LM", mock.MagicMock())
-    monkeypatch.setattr(RealDSPy.teleprompt, "MIPROv2", mock.MagicMock())
+    monkeypatch.setattr(RealDSPy, "MIPROv2", mock.MagicMock())  # dspy 3.x top-level
+    monkeypatch.setattr(RealDSPy.teleprompt, "MIPROv2", mock.MagicMock())  # legacy
+    RealDSPy.MIPROv2.return_value.compile = mock_compile_fn
     RealDSPy.teleprompt.MIPROv2.return_value.compile = mock_compile_fn
 
     from synthetic_evaluator import make_dspy_synthetic_pipeline

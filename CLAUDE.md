@@ -34,6 +34,16 @@ Optimizes Claude Code `SKILL.md`, `CLAUDE.md`, and `AGENTS.md` files using GEPA
 - **Never pass `temperature` or `top_k` with extended thinking enabled** — these parameters break Anthropic extended thinking; use `top_p` (0.95–1.0) instead
 - **Always pass back `thinking` AND `redacted_thinking` blocks** in tool-use loops — filtering on `block.type == "thinking"` silently drops redacted blocks and breaks reasoning continuity
 
+## DSPy 3.0 Upgrade (FR-11.1)
+
+This project upgrades to **dspy>=3.0.0,<4.0.0** (from dspy 2.x). Key implications:
+
+- **dspy 3.0+** is the minimum version; dspy 2.x is no longer supported
+- **litellm>=1.64.0** is required — dspy 3.x hard-requires this version as a floor
+- **gepa version override**: dspy 3.x declares `gepa[dspy]==0.0.27` as a hard pin, but this project pins gepa>=0.1.1 for Phase 9 multi-objective frontier_type support. The `[tool.uv] override-dependencies = ["gepa>=0.1.1"]` in pyproject.toml resolves the conflict without skipping dspy's 18 transitive runtime deps (orjson, typeguard, json-repair, tenacity, diskcache, cachetools, cloudpickle, xxhash, asyncer, regex, etc.). dspy.GEPA itself lives natively inside dspy 3.x and does not use the external gepa package at runtime.
+- **Dual backends**: Runners support both `dspy.MIPROv2` (legacy, default) and `dspy.GEPA` (native multi-objective) — use `--dspy-backend native-gepa` to select the new path
+- **Installation**: `uv sync` handles the override automatically — no manual steps needed
+
 ## LLM Configuration
 
 This project routes all LLM calls through litellm to the MiniMax Anthropic-compatible endpoint (`https://api.minimax.io/anthropic/v1`). The endpoint accepts standard Anthropic request formats with `anthropic/` model prefix.

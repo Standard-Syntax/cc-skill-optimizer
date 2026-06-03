@@ -961,7 +961,7 @@ def make_dspy_synthetic_pipeline(
     """
 
     import dspy
-    from dspy.teleprompt import MIPROv2
+    from dspy import MIPROv2
 
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
     reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)

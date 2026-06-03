@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Phase 12: Test surface + Final QA** (2026-06-03)
+  - New `tests/test_11_dspy_native_gepa.py` with 14 tests covering:
+    - `--dspy-backend native-gepa` CLI flag recognition
+    - `dspy.GEPA` top-level import verification
+    - `dspy.Prediction` metric return from native GEPA
+    - `side_info["scores"]` multi-objective threading
+  - Updated test mocks for dspy 3.x dual import paths:
+    - `mock_dspy_modules()` now mocks both `dspy.GEPA` (top-level) and `dspy.teleprompt.GEPA` (legacy)
+    - Extraction tests patch both `RealDSPy.MIPROv2` and `RealDSPy.teleprompt.MIPROv2`
+  - 72/74 total tests pass (2 pre-existing failures in test_optimize_fixes.py from defunct gepa.optimize_anything mock)
+
+- **Phase 11: DSPy 3.0 upgrade + dspy.GEPA native backend** (2026-06-03)
+  - Upgraded from dspy 2.x to dspy>=3.0.0,<4.0.0 (dspy 3.0+ required)
+  - litellm>=1.64.0 is now required (dspy 3.x hard-requires this version)
+  - New `--dspy-backend {mipro,native-gepa}` CLI flag:
+    - `mipro` (default): Legacy dspy.MIPROv2 path — backward compatible
+    - `native-gepa`: Uses dspy.GEPA (dspy 3.0+ native multi-objective optimizer) with reflective feedback
+  - New `run_dspy_native_gepa()` function in optimize.py using dspy.GEPA
+  - geqvist override-dependencies in pyproject.toml resolves dspy 3.x gepa pin conflict
+  - Installation: `uv sync` handles automatically — no manual steps needed
+
 - **Phase 10: Evaluator signal enhancements** (2026-06-03)
   - Increased truncation limits in evaluator `side_info`: error_messages[:10], bash_commands[:20], files_written[:20], final_assistant_msg[:2000]
   - Enriched `_build_feedback` with bash command sequence (first 12), files touched (first 8), distinct error count

@@ -30,7 +30,17 @@ SAMPLE_VAL_SET = [{"task_prompt": "test val", "outcome": "success"}]
 
 
 def mock_dspy_modules():
-    """Context manager to mock dspy modules in sys.modules."""
+    """Context manager to mock dspy modules in sys.modules.
+
+    dspy 3.x exposes optimizers at both top-level (dspy.GEPA, dspy.MIPROv2,
+    dspy.BootstrapFewShot) and via the legacy dspy.teleprompt submodule
+    (dspy.teleprompt.GEPA, dspy.teleprompt.MIPROv2). We mock BOTH paths
+    so that `from dspy import X` and `from dspy.teleprompt import X`
+    are both intercepted. The source code in optimize.py uses the
+    top-level form (canonical 3.x), so the dspy.X mocks are the
+    critical ones; the dspy.teleprompt.X mocks are kept for
+    backward compat with any remaining legacy call sites.
+    """
     mock_dspy = MagicMock()
     mock_teleprompt = MagicMock()
 
@@ -45,6 +55,14 @@ def mock_dspy_modules():
     mock_dspy.OutputField = MagicMock()
     mock_dspy.Example = MagicMock()
     mock_dspy.Prediction = MagicMock()
+
+    # dspy 3.x: optimizers exposed at top-level dspy namespace
+    mock_dspy.GEPA = MagicMock()
+    mock_dspy.MIPROv2 = MagicMock()
+    mock_dspy.BootstrapFewShot = MagicMock()
+
+    # Legacy: also exposed via dspy.teleprompt (backward compat)
+    mock_teleprompt.GEPA = MagicMock()
     mock_teleprompt.MIPROv2 = MagicMock()
 
     mocks = {

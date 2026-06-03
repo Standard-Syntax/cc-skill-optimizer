@@ -997,7 +997,7 @@ def run_dspy_gepa(
     This is more powerful but requires the DSPy program abstraction.
     """
     import dspy
-    from dspy.teleprompt import MIPROv2
+    from dspy import MIPROv2
 
     # Guard: temperature is incompatible with extended thinking per llm_config.py.
     # The dspy.LM constructor below passes temperature=0.7 (task) and temperature=1.0
@@ -1132,6 +1132,167 @@ def run_dspy_gepa(
     except Exception as exc:
         logger.warning("[run_dspy_gepa] DSPy stage-1 initialization failed: %s", exc)
     print(f"[dspy.MIPROv2] Saved to {output_dir}/best_candidate_dspy.md")
+    return best_skill
+
+
+def run_dspy_native_gepa(
+    seed_candidate: str,
+    train_set: list[dict],
+    val_set: list[dict],
+    objective: str,
+    max_metric_calls: int,
+    task_lm: str,
+    reflection_lm: str,
+    output_dir: Path,
+) -> str:
+    """
+    Use dspy.GEPA (the native multi-objective optimizer introduced in dspy 3.0)
+    to optimize the skill as a DSPy Predict signature. Returns the optimized skill
+    content as a string.
+    """
+    import dspy
+    from dspy import GEPA
+
+    # Guard: temperature is incompatible with extended thinking per llm_config.py.
+    # The dspy.LM constructor below passes temperature=0.7 (task) and temperature=1.0
+    # (reflection). If either model is configured with extended thinking, the API call
+    # will fail at runtime. This guard fails fast with a clear error rather than
+    # crashing at the first inference request.
+    #
+    # NOTE: This guard WILL fire for the current default models
+    # (task_lm=DEFAULT_MODEL="minimax/minimax-m2.7-highspeed",
+    #  reflection_lm=REFLECTION_MODEL="minimax/minimax-m3") because both are
+    # thinking-enabled models. This is the intended safety behavior: the user must
+    # explicitly acknowledge the conflict by either disabling thinking on those models
+    # or removing the temperature kwarg from the dspy.LM calls below.
+    if _model_uses_thinking(task_lm) or _model_uses_thinking(reflection_lm):
+        raise ValueError(
+            f"DSPy runner cannot combine temperature with extended thinking. "
+            f"task_lm={task_lm!r} reflection_lm={reflection_lm!r} — at least one model "
+            f"uses extended thinking. Either disable thinking on these models, or modify "
+            f"run_dspy_native_gepa to construct dspy.LM objects WITHOUT the temperature "
+            f"kwarg when thinking is enabled. See src/llm_config.py lines 99-105 for "
+            f"the conflict."
+        )
+
+    # Configure DSPy LMs
+    task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
+    reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
+    dspy.configure(lm=task_lm_obj)
+
+    # DSPy Signature: given task + context, produce high-quality response
+    # (Duplicated from run_dspy_gepa for self-containment; dspy.GEPA uses the same
+    #  SkillGuidedTask signature but the metric returns dspy.Prediction for feedback.)
+    class SkillGuidedTask(dspy.Signature):
+        """Apply repository skills to complete a software engineering task."""
+
+        skill_instructions: str = dspy.InputField(desc="SKILL.md content guiding the agent")
+        task_prompt: str = dspy.InputField(desc="The software engineering task to complete")
+        error_context: str = dspy.InputField(
+            desc="Prior errors and context from the session", default=""
+        )
+        completion: str = dspy.OutputField(
+            desc="How the agent should approach and complete this task"
+        )
+
+    class SkillProgram(dspy.Module):
+        def __init__(self, skill_content: str):
+            self.skill_content = skill_content
+            self.predictor = dspy.Predict(SkillGuidedTask)
+
+        def forward(self, task_prompt: str, error_context: str = "") -> dspy.Prediction:
+            return self.predictor(
+                skill_instructions=self.skill_content,
+                task_prompt=task_prompt,
+                error_context=error_context,
+            )
+
+    # Convert episodes to DSPy Examples
+    def ep_to_example(ep: dict) -> dspy.Example:
+        errors = "; ".join(ep.get("error_messages", [])[:2])
+        return dspy.Example(
+            task_prompt=ep.get("task_prompt", ""),
+            error_context=errors,
+            completion=_ideal_completion_from_episode(ep),
+        ).with_inputs("task_prompt", "error_context")
+
+    def _ideal_completion_from_episode(ep: dict) -> str:
+        """Construct a gold-standard completion hint from the real session."""
+        parts = []
+        outcome = ep.get("outcome", "unknown")
+        if outcome == "success":
+            parts.append("Successfully completed the task with minimal tool calls.")
+        elif outcome == "error":
+            parts.append(
+                "Task encountered errors. The key issues were: "
+                + "; ".join(ep.get("error_messages", ["unknown"])[:2])
+            )
+        cmds = ep.get("bash_commands", [])[:3]
+        if cmds:
+            parts.append("Key commands: " + "; ".join(cmds))
+        return " ".join(parts) or "Task completed."
+
+    dspy_train = [ep_to_example(ep) for ep in train_set if ep.get("task_prompt")]
+    dspy_val = [ep_to_example(ep) for ep in val_set if ep.get("task_prompt")]
+
+    # Metric: dspy 3.x GEPAFeedbackMetric signature — returns dspy.Prediction so the
+    # reflection LM can iterate on failure modes via the feedback field.
+    def metric(
+        gold, pred, trace=None, pred_name=None, pred_trace=None
+    ) -> dspy.Prediction:
+        for ep in train_set + val_set:
+            if ep.get("task_prompt", "")[:100] == gold.task_prompt[:100]:
+                from evaluator import score_episode
+
+                score, side_info = score_episode(ep)
+                feedback = side_info.get("feedback", "")
+                return dspy.Prediction(score=score, feedback=feedback)
+        return dspy.Prediction(
+            score=0.5, feedback="No matching episode found for gold example."
+        )
+
+    program = SkillProgram(seed_candidate)
+
+    optimizer = GEPA(
+        metric=metric,
+        auto="medium",
+        max_metric_calls=max_metric_calls,
+        reflection_lm=reflect_lm_obj,
+        num_threads=4,
+        track_stats=True,
+    )
+
+    print("\n[dspy.GEPA] Compiling program (dspy 3.x native multi-objective)")
+    print(f"  train={len(dspy_train)} val={len(dspy_val)} max_metric_calls={max_metric_calls}\n")
+
+    optimized = optimizer.compile(program, trainset=dspy_train, valset=dspy_val)
+
+    # Extract optimized skill from the compiled program
+    # dspy.GEPA optimizes the predictor's instructions — retrieve them
+    best_skill = seed_candidate  # fallback
+    try:
+        pred = optimized.predictor
+        if hasattr(pred, "signature"):
+            sig = pred.signature
+            instructions = getattr(sig, "instructions", None)
+            if instructions:
+                best_skill = instructions
+    except Exception:
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "[run_dspy_native_gepa] Could not extract optimized instructions from "
+            "dspy.GEPA — using seed_candidate"
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "best_candidate_dspy.md").write_text(best_skill, encoding="utf-8")
+    try:
+        optimized.save(str(output_dir / "dspy_program.json"))
+    except Exception as exc:
+        logger.warning(
+            "[run_dspy_native_gepa] DSPy stage-1 initialization failed: %s", exc
+        )
+    print(f"[dspy.GEPA] Saved to {output_dir}/best_candidate_dspy.md")
     return best_skill
 
 
@@ -1404,6 +1565,18 @@ def main() -> None:
         help="Use DSPy (BootstrapFewShot → GEPA) instead of gepa.optimize_anything",
     )
     ap.add_argument(
+        "--dspy-backend",
+        choices=["mipro", "native-gepa"],
+        default="mipro",
+        help=(
+            "Backend for the DSPy optimizer in --use-dspy session-backed mode. "
+            "'mipro' uses the legacy dspy.MIPROv2 path (default, backward compatible). "
+            "'native-gepa' uses dspy.GEPA (dspy 3.0+ native multi-objective optimizer) "
+            "with reflective feedback. Has no effect on --target synthetic mode "
+            "(make_dspy_synthetic_pipeline always uses MIPROv2)."
+        ),
+    )
+    ap.add_argument(
         "--use-llm-judge",
         action="store_true",
         help="Use LLM judge in session mode (ignored in --no-sessions, always uses judge)",
@@ -1666,16 +1839,29 @@ def main() -> None:
         )
 
         if args.use_dspy:
-            best = run_dspy_gepa(
-                seed_candidate=seed_candidate,
-                train_set=train_set,
-                val_set=val_set,
-                objective=objective,
-                max_metric_calls=effective_max_evals,
-                task_lm=args.task_lm,
-                reflection_lm=args.reflection_lm,
-                output_dir=output_dir,
-            )
+            # --dspy-backend selects between MIPROv2 (legacy) and dspy.GEPA (dspy 3.0+ native)
+            if args.dspy_backend == "native-gepa":
+                best = run_dspy_native_gepa(
+                    seed_candidate=seed_candidate,
+                    train_set=train_set,
+                    val_set=val_set,
+                    objective=objective,
+                    max_metric_calls=effective_max_evals,
+                    task_lm=args.task_lm,
+                    reflection_lm=args.reflection_lm,
+                    output_dir=output_dir,
+                )
+            else:  # "mipro" (default)
+                best = run_dspy_gepa(
+                    seed_candidate=seed_candidate,
+                    train_set=train_set,
+                    val_set=val_set,
+                    objective=objective,
+                    max_metric_calls=effective_max_evals,
+                    task_lm=args.task_lm,
+                    reflection_lm=args.reflection_lm,
+                    output_dir=output_dir,
+                )
         else:
             best = run_gepa_optimize_anything(
                 seed_candidate=seed_candidate,

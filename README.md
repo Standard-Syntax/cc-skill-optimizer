@@ -80,6 +80,7 @@ nohup uv run python watch_and_learn.py \
 ### 3. With DSPy (more powerful program optimization)
 
 ```bash
+# Default: uses MIPROv2 (legacy DSPy backend, backward compatible)
 uv run python optimize.py \
     --target skill \
     --use-dspy \
@@ -88,7 +89,22 @@ uv run python optimize.py \
     --max-evals 200 \
     --task-lm minimax/minimax-m2.7-highspeed \
     --reflection-lm minimax/minimax-m3
+
+# New in Phase 11: dspy.GEPA native backend (dspy 3.0+ required)
+uv run python optimize.py \
+    --target skill \
+    --use-dspy \
+    --dspy-backend native-gepa \
+    --seed-file skills/banking-analytics-seed.md \
+    --project-filter banking \
+    --max-evals 200 \
+    --task-lm minimax/minimax-m2.7-highspeed \
+    --reflection-lm minimax/minimax-m3
 ```
+
+**DSPy backends:**
+- `--dspy-backend mipro` (default): Legacy `dspy.MIPROv2` path — backward compatible
+- `--dspy-backend native-gepa`: New in Phase 11 — uses `dspy.GEPA` (dspy 3.0+ native multi-objective optimizer) with reflective feedback
 
 ### 4. Optimize CLAUDE.md (global project instructions)
 

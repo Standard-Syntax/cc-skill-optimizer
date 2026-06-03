@@ -7,11 +7,12 @@ requires-python = ">=3.13"
 dependencies = [
     # Core optimizers
     "gepa>=0.1.1",
-    "dspy>=2.6.0",
-    "pyyaml>=6.0",   # YAML validation gate for --target agent
+    "dspy>=3.0.0,<4.0.0",  # dspy 3.x has native dspy.GEPA; gepa version pinned
+    "pyyaml>=6.0",          # YAML validation gate for --target agent
 
     # LLM routing (gepa + dspy both use litellm under the hood)
-    "litellm>=1.55.0",
+    # dspy 3.x hard-requires litellm>=1.64.0 — see [tool.uv] override below
+    "litellm>=1.64.0",
 
     # Anthropic SDK (for direct API fallback)
     "anthropic>=0.49.0",
@@ -27,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 judge = [
-    "litellm[proxy]>=1.55.0",
+    "litellm[proxy]>=1.64.0",
 ]
 live = []
 all = [
@@ -57,6 +58,19 @@ dev = [
     "ruff>=0.9.0",
     "ty>=0.0.1a8",
 ]
+
+# ---- UV resolver overrides ---------------------------------------------
+# dspy 3.x declares `gepa[dspy]==0.0.27` as a hard pin, but the project
+# uses gepa 0.1.1 (Phase 9 added multi-objective frontier_type support that
+# is not in gepa 0.0.27). dspy.GEPA is a NATIVE implementation in dspy 3.x
+# (lives in dspy/teleprompt/gepa/gepa.py) and does not use the external gepa
+# package at runtime, so the version difference is harmless for dspy. The
+# override forces uv's resolver to use gepa 0.1.1 globally without breaking
+# dspy's subdependency graph or skipping dspy's 18 transitive runtime deps
+# (orjson, typeguard, json-repair, tenacity, diskcache, cachetools,
+# cloudpickle, xxhash, asyncer, regex, etc.). See FR-11.1.
+[tool.uv]
+override-dependencies = ["gepa>=0.1.1"]
 
 # ---- Tool config ----------------------------------------------------------
 [tool.ruff]
