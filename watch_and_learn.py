@@ -51,7 +51,13 @@ def watch_and_learn(
     corpus: list[dict] = build_corpus(claude_dir, project_filter, min_tool_calls=2)
     print(f"[watch] Loaded {len(corpus)} existing episodes")
 
-    known_paths: set[str] = {ep["source_path"] for ep in corpus}
+    # Track (path, size) pairs across polls. A file is "stable" when its size
+    # matches the previous poll's size for two consecutive cycles.
+    known_files: dict[str, int] = {}  # path → size at last poll
+    stable_files: set[str] = set()  # paths stable across two consecutive polls
+    # Pre-existing files (loaded from corpus at startup) are not in known_files
+    # yet; treat them with the mtime fallback on first encounter.
+    preexisting_paths: set[str] = {ep["source_path"] for ep in corpus}
     episodes_since_last_opt = 0
     current_skill = skill_file.read_text(encoding="utf-8") if skill_file.exists() else ""
 
@@ -66,24 +72,65 @@ def watch_and_learn(
                     continue
                 if project_filter and project_filter not in project_dir.name:
                     continue
-                for jsonl in project_dir.glob("*.jsonl"):
-                    if str(jsonl) not in known_paths:
-                        # Only process sessions that haven't been modified in >10s
-                        # (give Claude Code time to finish writing)
-                        if time.time() - jsonl.stat().st_mtime > 10:
-                            new_files.append(jsonl)
+
+                # Scan both top-level and subagent JSONL files. The subagent glob is wrapped
+                # in try/except to tolerate unreadable subagents/ directories (e.g. on shared
+                # filesystems with restrictive permissions) without crashing the long-running
+                # daemon. Top-level glob is NOT wrapped because the project_dir is already
+                # guarded by is_dir() and we want PermissionError on the project root to fail fast.
+                def _safe_subagent_glob(subdir: Path) -> list[Path]:
+                    try:
+                        return list(subdir.glob("*.jsonl"))
+                    except (PermissionError, OSError) as exc:
+                        print(f"[watch] WARN: could not scan {subdir}: {exc}")
+                        return []
+
+                candidate_files: list[Path] = list(
+                    project_dir.glob("*.jsonl")
+                ) + _safe_subagent_glob(project_dir / "subagents")
+
+                for jsonl in candidate_files:
+                    path_str = str(jsonl)
+                    try:
+                        current_size = jsonl.stat().st_size
+                    except (FileNotFoundError, OSError):
+                        # File was deleted between glob and stat — skip silently
+                        continue
+
+                    prev_size = known_files.get(path_str)
+
+                    if prev_size is None:
+                        # First poll for this file. Use mtime guard for pre-existing files
+                        # (where we have no size history); new files need a second poll to confirm stability.
+                        if path_str in preexisting_paths:
+                            # Pre-existing: trust the mtime guard (legacy behavior, conservative)
+                            if time.time() - jsonl.stat().st_mtime > 10:
+                                known_files[path_str] = current_size
+                                if path_str not in stable_files:
+                                    new_files.append(jsonl)
+                        else:
+                            # New file: record size, wait for second poll to confirm stability
+                            known_files[path_str] = current_size
+                    elif prev_size == current_size and path_str not in stable_files:
+                        # Size unchanged from previous poll → mark as stable and add to new_files
+                        stable_files.add(path_str)
+                        new_files.append(jsonl)
+                    else:
+                        # Size changed: update record; wait for next poll to confirm stability
+                        known_files[path_str] = current_size
 
         for path in new_files:
-            if str(path) in known_paths:
+            path_str = str(path)
+            if path_str in stable_files:
                 continue
             try:
                 ep = parse_session(path)
                 if not ep["task_prompt"] or len(ep["tool_calls"]) < 2:
-                    known_paths.add(str(path))
+                    stable_files.add(path_str)
                     continue
 
                 corpus.append(ep)
-                known_paths.add(str(path))
+                stable_files.add(path_str)
                 episodes_since_last_opt += 1
 
                 outcome_icon = {
@@ -114,7 +161,7 @@ def watch_and_learn(
 
             except Exception as exc:
                 print(f"[watch] Error parsing {path}: {exc}", file=sys.stderr)
-                known_paths.add(str(path))
+                stable_files.add(path_str)
 
         time.sleep(poll_interval)
 

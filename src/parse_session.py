@@ -13,6 +13,10 @@ Output schema (list of dicts):
         "tool_calls":   list[dict],   # [{tool, input, result, success}, ...]
         "assistant_text": list[str],  # all assistant text blocks
         "outcome":      str,          # "success" | "error" | "interrupted" | "unknown"
+        "neutral_closing": bool,      # True if primary outcome was "unknown" but secondary
+                                      # heuristic (no errors + files written) fired.
+                                      # Evaluators should map this to a higher score (~0.7)
+                                      # than plain "unknown" (0.5).
         "error_messages": list[str],  # stderr / error fields from tool_results
         "bash_commands": list[str],   # every bash command executed
         "files_read":   list[str],    # every file path read
@@ -43,9 +47,24 @@ DEFAULT_CLAUDE_DIR = Path.home() / ".claude"
 
 # Positive completion signals for conservative outcome inference
 POSITIVE_COMPLETION_SIGNALS = (
-    "done", "complete", "completed", "finished", "success", "succeeded",
-    "✓", "implemented", "created", "added", "fixed", "wrote", "updated",
-    "all set", "shipped", "ready", "passed", "deployed",
+    "done",
+    "complete",
+    "completed",
+    "finished",
+    "success",
+    "succeeded",
+    "✓",
+    "implemented",
+    "created",
+    "added",
+    "fixed",
+    "wrote",
+    "updated",
+    "all set",
+    "shipped",
+    "ready",
+    "passed",
+    "deployed",
 )
 
 
@@ -340,6 +359,11 @@ def parse_session(path: Path) -> dict:
                     }
                 )
 
+    # Secondary heuristic flag: if primary inference returns "unknown" but the
+    # session shows strong completion signals (no errors, files written), tag
+    # it as a "neutral closing" so the evaluator can map to ~0.7 instead of 0.5.
+    neutral_closing: bool = False
+
     # Infer outcome if not already set (conservative — require positive completion signal)
     if outcome == "unknown":
         if error_messages:
@@ -350,10 +374,12 @@ def parse_session(path: Path) -> dict:
                 outcome = "success"
             elif any(w in last_msg for w in ("error", "failed", "cannot", "sorry")):
                 outcome = "error"
-            else:
-                outcome = "unknown"  # no positive signal → ambiguous
-        else:
-            outcome = "unknown"
+
+    # Secondary heuristic: if outcome is still "unknown" but the session shows
+    # strong completion signals (no errors, files written), tag as neutral_closing.
+    # The evaluator maps "unknown" + neutral_closing=True to ~0.7 (vs 0.5 for plain unknown).
+    if outcome == "unknown" and not error_messages and len(files_written) > 0:
+        neutral_closing = True
 
     duration_s: float | None = None
     if len(timestamps) >= 2:
@@ -365,6 +391,7 @@ def parse_session(path: Path) -> dict:
         "tool_calls": tool_calls,
         "assistant_text": assistant_texts,
         "outcome": outcome,
+        "neutral_closing": neutral_closing,  # True if secondary heuristic fired
         "error_messages": error_messages,
         "bash_commands": bash_commands,
         "files_read": files_read,
@@ -386,6 +413,7 @@ def _empty_episode(session_id: str, path: Path) -> dict:
         "tool_calls": [],
         "assistant_text": [],
         "outcome": "unknown",
+        "neutral_closing": False,
         "error_messages": [],
         "bash_commands": [],
         "files_read": [],
@@ -410,6 +438,7 @@ def build_corpus(
     project_filter: str | None = None,
     min_tool_calls: int = 2,
     skip_empty_prompts: bool = True,
+    skip_paths: set[str] | None = None,
 ) -> list[dict]:
     """
     Load all sessions matching filters and return the parsed episode list.
@@ -419,9 +448,18 @@ def build_corpus(
         project_filter:    Optional substring to filter project directory names.
         min_tool_calls:    Discard sessions with fewer tool calls (too trivial).
         skip_empty_prompts: Discard sessions with no recoverable task prompt.
+        skip_paths:        Optional set of absolute path strings to skip. Use this
+                          to avoid re-parsing files that have already been processed
+                          (e.g. by watch_and_learn.py's cumulative known_files set).
+                          Callers should pass the cumulative set across all
+                          watch sessions to ensure files are parsed exactly once.
     """
     episodes: list[dict] = []
+    skipped_count = 0
     for path in iter_session_files(claude_dir, project_filter):
+        if skip_paths is not None and str(path) in skip_paths:
+            skipped_count += 1
+            continue
         ep = parse_session(path)
         if skip_empty_prompts and not ep["task_prompt"]:
             continue
@@ -429,7 +467,11 @@ def build_corpus(
             continue
         episodes.append(ep)
 
-    print(f"[parse_session] Loaded {len(episodes)} episodes from {claude_dir}", file=sys.stderr)
+    skip_msg = f" (skipped {skipped_count} already-processed)" if skipped_count else ""
+    print(
+        f"[parse_session] Loaded {len(episodes)} episodes from {claude_dir}{skip_msg}",
+        file=sys.stderr,
+    )
     return episodes
 
 

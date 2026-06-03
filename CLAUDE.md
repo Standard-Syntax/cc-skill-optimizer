@@ -30,7 +30,7 @@ Optimizes Claude Code `SKILL.md`, `CLAUDE.md`, and `AGENTS.md` files using GEPA
 
 - **Always use `uv run`** for any Python script execution — bare `python` will miss venv dependencies
 - **GEPA requires (score, side_info) tuple** from evaluator — returning a flat float breaks ASI (Adaptive Strategy Integration) reflection loop
-- **llm_config.py sets env vars as side-effect** on import — import it before any litellm calls to ensure API keys and base URLs are set correctly
+- **Always call `llm_config.configure()` explicitly** before any litellm calls — the module no longer runs as a side effect on import
 - **Never pass `temperature` or `top_k` with extended thinking enabled** — these parameters break Anthropic extended thinking; use `top_p` (0.95–1.0) instead
 - **Always pass back `thinking` AND `redacted_thinking` blocks** in tool-use loops — filtering on `block.type == "thinking"` silently drops redacted blocks and breaks reasoning continuity
 

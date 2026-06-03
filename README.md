@@ -193,10 +193,12 @@ Each JSONL line is one of:
 - **error_messages**: stderr/error fields from failed tool results
 - **bash_commands**: every shell command executed
 - **outcome**: inferred success/error/interrupted/unknown
+- **neutral_closing**: true if outcome=unknown + no errors + files written (~0.7 score)
 - **token_stats**: input/output/cache tokens (for efficiency scoring)
 - **duration_s**: wall-clock time
 - **thinking_blocks**: extended thinking content
 - **compaction_summary**: whether context was compacted (session too long)
+- **skip_paths**: cumulative set of already-processed files for dedup
 
 ### GEPA Evaluator (`src/evaluator.py`)
 
@@ -204,13 +206,14 @@ Two scoring modes:
 
 **Heuristic scoring (default, free)**:
 - Base: outcome signal (success=1.0, error=0.0, unknown=0.5)
+- neutral_closing bonus: unknown outcome + no errors + files written = ~0.7 (higher-confidence completion)
 - Efficiency bonus: fewer tool calls + shorter duration = +0.15 max
-- Cache bonus: high prompt cache hit ratio = +0.05 max
 
 **LLM judge scoring (--use-llm-judge)**:
 - An LLM reads the candidate skill + episode trace
 - Scores 0-1 how much the skill would have helped
-- Weighted 40% LLM + 60% heuristic by default
+- Weighted 65% LLM + 35% heuristic by default (was 40%/60%)
+- Full context: 8000 chars (raised from 3000)
 
 ### GEPA Optimization (`optimize.py`)
 
@@ -254,6 +257,14 @@ export OPENAI_API_KEY="sk-..."      # if using OpenAI models
 export GEMINI_API_KEY="..."          # if using Gemini models
 ```
 
+**Important**: `llm_config.configure()` must be called explicitly before using the optimizer. The module no longer runs as a side effect on import.
+
+```python
+import llm_config
+llm_config.configure()  # Required: validates API keys
+# Now safe to use litellm/gepa
+```
+
 litellm handles routing — use any model string it supports.
 
 ### Recommended LM combinations
@@ -287,7 +298,10 @@ cc-skill-optimizer/
 ├── src/
 │   ├── parse_session.py     # Claude Code JSONL parser
 │   ├── section_parser.py    # Within-file section parser for nested doc optimization
-│   └── evaluator.py         # GEPA-compatible scoring functions
+│   ├── synthetic_evaluator.py  # GEPA + DSPy synthetic evaluation
+│   ├── evaluator.py         # GEPA-compatible scoring functions
+│   ├── utils.py            # Shared helpers (_parse_llm_json)
+│   └── llm_config.py      # MiniMax LLM configuration
 ├── skills/
 │   └── banking-analytics-seed.md  # Derek's seed SKILL.md
 └── outputs/                 # Optimized artifacts land here
@@ -346,6 +360,36 @@ def my_evaluate(candidate: str, example: dict) -> tuple[float, dict]:
 ---
 
 ## Changelog
+
+### Phase 8 (2026-06-03) — Final QA Verification
+
+- **Full QA gate pass**: lint, reviewer, test_engineer, drift verification — all gates approved
+- No regressions in Phase 1-7 features
+
+### Phase 4-7 Improvements (2026-06-03)
+
+**Phase 4: GEPA signal-quality fixes**
+- `oa.log()` wired as primary ASI channel — 6 diagnostic calls (outcome, duration, errors, tool calls, compaction, judge score) flow to reflection LM
+- `--max-evals` CLI override now works (was silently ignored)
+- M2.7 judge detection (case-insensitive substring dispatch when `judge_lm` contains "m2.7")
+- LLM judge context raised 3000→8000 chars (full skill visible to judge)
+- Thinking model guard prevents temperature+thinking conflicts
+
+**Phase 5: Scoring rubric alignment**
+- `_cache_bonus` removed from score formula → exposed via `side_info["cache_ratio"]` (indicates session input structure, not skill quality)
+- DSPy MIPROv2 instruction extraction — optimized instructions + few-shot demos injected into output
+- Judge weight standardized to 0.65 in both `make_replay_evaluator` and `make_synthetic_evaluator`
+
+**Phase 6: Data ingestion reliability**
+- Subagent JSONL scanning — now scans both `project_dir/*.jsonl` and `project_dir/subagents/agent-*.jsonl`
+- Two-poll size stability — mtime replaced with size tracking across polls (handles long thinking pauses)
+- `skip_paths` parameter for cumulative dedup across watch sessions
+
+**Phase 7: Module hygiene**
+- Section parser whitespace stripping — `lstrip('\n')` prevents round-trip accumulation
+- Heading de-collision — `_make_unique_key()` adds `_2`, `_3` suffixes for collisions
+- Explicit `llm_config.configure()` — module no longer runs as side effect
+- Nested evaluator priority fallback — prefers root keys (no `/`) over nested, then alphabetical
 
 ### Phase 1 (2026-06-03) — Code Review Remediation
 

@@ -35,7 +35,6 @@ Usage (standalone)
     evaluate = make_synthetic_evaluator(
         task_library=tasks,
         judge_lm="anthropic/claude-haiku-4-5-20251001",
-        judge_weight=0.7,
     )
 
 Usage in optimize_anything
@@ -60,6 +59,7 @@ Usage in optimize_anything
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -82,6 +82,32 @@ except ImportError:
     DIRECT_OUTPUT_PREFIX = "Respond directly and concisely. Output only what is requested."
 
 from utils import _parse_llm_json
+
+# ---------------------------------------------------------------------------
+# GEPA ASI channel
+# oa.log() is a no-op outside the gepa wrapper context (e.g. unit tests).
+# The wrapper drains LogContext and injects it as side_info["log"]; the
+# reflection LM reads side_info["feedback"] — so we also append the captured
+# log string to feedback below.
+# ---------------------------------------------------------------------------
+try:
+    import gepa.optimize_anything as oa
+except ImportError:
+
+    class _NoOpOa:
+        @staticmethod
+        def log(*args, **kwargs):  # noqa: ARG001
+            pass
+
+        @staticmethod
+        def get_log_context():
+            class _NoOpCtx:
+                def drain(self) -> str:
+                    return ""
+
+            return _NoOpCtx()
+
+    oa = _NoOpOa()
 
 # ---------------------------------------------------------------------------
 # Built-in task libraries
@@ -767,7 +793,7 @@ def judge_score_task(
 def make_synthetic_evaluator(
     task_library: list[dict],
     judge_lm: str = "anthropic/claude-haiku-4-5-20251001",
-    judge_weight: float = 0.65,
+    judge_weight: float = 0.65,  # LLM judge is the primary semantic signal; heuristic score is compressed in [0.35, 0.85]
     structural_weight: float = 0.35,
     use_judge: bool = True,
 ) -> Any:
@@ -791,20 +817,61 @@ def make_synthetic_evaluator(
             f"judge_weight ({judge_weight}) + structural_weight ({structural_weight}) must sum to 1.0 when use_judge=True"
         )
 
+    # Pick M2.7-specific judge if the configured model contains "m2.7" (case-insensitive).
+    # The M2.7 judge uses a rubric that rewards error-recovery strategies, multiple
+    # solution approaches, and penalizes verbose skills over 150 words.
+    _judge_fn = judge_score_task_m2_7 if "m2.7" in judge_lm.lower() else judge_score_task
+
     def evaluate(candidate: str, example: dict) -> tuple[float, dict]:
-        try:
-            import gepa.optimize_anything as oa  # noqa: F401 — enables oa.log() routing when gepa is present
-        except ImportError:
-            pass  # running outside gepa context (e.g. tests) — oa.log() simply won't route
+        import time
+
+        eval_start = time.monotonic()
 
         struct_score, struct_breakdown = structural_score(candidate)
 
         if use_judge:
-            j_score, j_info = judge_score_task(candidate, example, judge_lm)
+            j_score, j_info = _judge_fn(candidate, example, judge_lm)
             final = judge_weight * j_score + structural_weight * struct_score
         else:
             j_score, j_info = struct_score, {}
             final = struct_score
+
+        eval_duration = time.monotonic() - eval_start
+
+        # --- GEPA ASI channel: log diagnostic fields before building side_info ---
+        try:
+            # Episode outcome
+            oa.log(f"Outcome: {example.get('outcome', 'unknown')}")
+
+            # Duration
+            oa.log(f"Duration: {eval_duration:.1f}s")
+
+            # First 2 error_messages (truncated to 200 chars)
+            errors = example.get("error_messages", [])
+            for err in errors[:2]:
+                oa.log(f"Error: {err[:200]}")
+
+            # First 10 tool names joined with " → "
+            tool_calls = example.get("tool_calls", [])
+            if tool_calls:
+                tool_names = [
+                    tc.get("tool", str(tc)) if isinstance(tc, dict) else str(tc)
+                    for tc in tool_calls[:10]
+                ]
+                oa.log(f"Tool calls: {' → '.join(tool_names)}")
+
+            # Context compaction signal
+            if example.get("compaction_summary"):
+                oa.log("Context compaction hit — skill may be too verbose")
+
+            # Judge score / reasoning (high-level verdict only)
+            if use_judge and j_info:
+                jsc = j_info.get("judge_score")
+                if jsc is not None:
+                    oa.log(f"Judge score: {jsc:.2f}")
+        except Exception:
+            # oa.log() is a no-op outside wrapper context — tolerate here
+            pass
 
         side_info = {
             "score": final,
@@ -819,6 +886,11 @@ def make_synthetic_evaluator(
             **j_info,
         }
 
+        # Capture GEPA log context for injection into feedback (reflection LM reads side_info["feedback"])
+        _captured_log = ""
+        with contextlib.suppress(Exception):
+            _captured_log = oa.get_log_context().drain()
+
         # Build feedback for GEPA reflection LM
         if use_judge and j_info:
             j_reasoning = j_info.get("reasoning", "")
@@ -829,17 +901,29 @@ def make_synthetic_evaluator(
             if j_gaps:
                 gaps_text = "; ".join(j_gaps[:3])[:200]
                 parts.append(f"Gaps identified: {gaps_text}")
+            if _captured_log:
+                parts.append(f"Diagnostic log: {_captured_log}")
             side_info["feedback"] = " ".join(parts)
         else:
             # No judge — feedback from structural score alone
             if struct_breakdown:
-                missing = [name for name, score in struct_breakdown.items() if score == 0.0 and name.startswith("section_")]
+                missing = [
+                    name
+                    for name, score in struct_breakdown.items()
+                    if score == 0.0 and name.startswith("section_")
+                ]
                 if missing:
-                    side_info["feedback"] = f"Structural score {struct_score:.2f}. Missing sections: {', '.join(missing[:3])}."
+                    side_info["feedback"] = (
+                        f"Structural score {struct_score:.2f}. Missing sections: {', '.join(missing[:3])}."
+                    )
                 else:
-                    side_info["feedback"] = f"Structural score {struct_score:.2f}. No specific gaps detected."
+                    side_info["feedback"] = (
+                        f"Structural score {struct_score:.2f}. No specific gaps detected."
+                    )
             else:
                 side_info["feedback"] = f"Score {final:.2f}. No specific feedback available."
+            if _captured_log:
+                side_info["feedback"] += f" Diagnostic log: {_captured_log}"
 
         return final, side_info
 
@@ -1035,6 +1119,22 @@ def make_dspy_synthetic_pipeline(
         optimized = bootstrapped
 
     # ------------------------------------------------------------------ #
+    # Extract MIPROv2-optimized instructions and few-shot demos.
+    # Access path verified for DSPy 2.6.27 with dspy.Predict modules.
+    # Graceful fallback if API path changes between DSPy versions.
+    # ------------------------------------------------------------------ #
+    optimized_instructions: str | None = None
+    optimized_demos: list = []
+    try:
+        optimized_instructions = optimized.assess.signature.instructions
+    except AttributeError:
+        print(
+            "[dspy-synthetic] WARN: could not extract optimized instructions — DSPy API may have changed"
+        )
+    with contextlib.suppress(Exception):
+        optimized_demos = list(getattr(optimized.assess, "demos", []) or [])
+
+    # ------------------------------------------------------------------ #
     # Extract improved skill content by running the optimized program
     # on each task and collecting the improved_guidance fields
     # ------------------------------------------------------------------ #
@@ -1052,11 +1152,44 @@ def make_dspy_synthetic_pipeline(
             pass
 
     # Combine seed with extracted guidance
+    combined = seed_candidate.rstrip()
+    sections: list[str] = []
+
+    # Section 1: MIPROv2-optimized instructions (the most valuable output)
+    if optimized_instructions and optimized_instructions.strip():
+        sections.append(
+            "## Optimized Instructions (MIPROv2-refined)\n\n"
+            f"{optimized_instructions.strip()}\n\n"
+            "<!-- This block was discovered by MIPROv2 instruction optimization; it represents\n"
+            "the prompt template the reflection LM found to produce the highest-scoring outputs. -->"
+        )
+
+    # Section 2: Few-shot demos (if any were selected)
+    if optimized_demos:
+        demo_blocks: list[str] = []
+        for i, demo in enumerate(optimized_demos[:3], start=1):  # limit to first 3
+            demo_input = getattr(demo, "task_description", "<demo>")
+            demo_output = getattr(demo, "improved_guidance", "<output>")
+            demo_blocks.append(
+                f"### Example {i}\n\n"
+                f"**Task:** {str(demo_input)[:120]}\n\n"
+                f"**Guidance:**\n{str(demo_output)[:300]}"
+            )
+        if demo_blocks:
+            sections.append(
+                "## Few-Shot Examples (from MIPROv2 bootstrap)\n\n"
+                + "\n\n".join(demo_blocks)
+                + "\n\n<!-- These examples were selected by MIPROv2 as high-scoring demonstrations. -->"
+            )
+
+    # Section 3: Auto-generated guidance (existing)
     if guidance_blocks:
-        combined = seed_candidate.rstrip() + "\n\n## Auto-Generated Guidance (GEPA-refined)\n\n"
-        combined += "\n\n".join(guidance_blocks)
-    else:
-        combined = seed_candidate
+        sections.append(
+            "## Auto-Generated Guidance (GEPA-refined)\n\n" + "\n\n".join(guidance_blocks)
+        )
+
+    if sections:
+        combined += "\n\n" + "\n\n".join(sections)
 
     # Save
     from pathlib import Path as _Path

@@ -26,6 +26,13 @@ blocks must be passed back (tool use loops only).
 
 temperature and top_k are INCOMPATIBLE with Anthropic extended thinking —
 they are intentionally omitted from INFERENCE_PARAMS.
+
+judge_weight default
+--------------------
+Both make_replay_evaluator and make_synthetic_evaluator default judge_weight to
+0.65 (65% LLM judge / 35% heuristic).  The LLM judge carries the primary
+semantic signal; the heuristic is compressed into the [0.35, 0.85] band so it
+never dominates the blend.
 """
 
 from __future__ import annotations
@@ -83,11 +90,17 @@ def _build_feedback(episode: dict, side_info: dict) -> str:
     if outcome == "error" and errs:
         parts.append(f"Agent hit errors: {'; '.join(errs[:2])}")
     if n_tools >= 25:
-        parts.append(f"Excessive tool calls ({n_tools}); skill lacks shortcuts or pointer for direct path.")
+        parts.append(
+            f"Excessive tool calls ({n_tools}); skill lacks shortcuts or pointer for direct path."
+        )
     if compaction:
-        parts.append("Context compaction hit during the session — skill may be too verbose or omit key pointers.")
+        parts.append(
+            "Context compaction hit during the session — skill may be too verbose or omit key pointers."
+        )
     if outcome == "interrupted":
-        parts.append("Session ended before agent completed; review whether the skill guided the agent to a clear stopping point.")
+        parts.append(
+            "Session ended before agent completed; review whether the skill guided the agent to a clear stopping point."
+        )
     if not parts:
         parts.append(f"Outcome: {outcome}. No specific failure detected.")
     return " ".join(parts)
@@ -133,15 +146,14 @@ def _efficiency_bonus(episode: dict, thresholds: dict | None = None) -> float:
     return max(-0.15, min(0.15, bonus))
 
 
-def _cache_bonus(episode: dict) -> float:
-    """Reward high cache hit ratio (SKILL.md keeps tokens in prompt-cache)."""
+def _compute_cache_ratio(episode: dict) -> float:
+    """Return raw cache hit ratio (cache_read / total_input), clamped to [0.0, 1.0]."""
     tok = episode.get("token_stats", {})
     cache_read = tok.get("cache_read", 0)
     total_input = tok.get("input", 0) + cache_read
     if total_input == 0:
         return 0.0
-    ratio = cache_read / total_input
-    return min(0.10, ratio * 0.10)
+    return max(0.0, min(1.0, cache_read / total_input))
 
 
 def score_episode(episode: dict, thresholds: dict | None = None) -> tuple[float, dict]:
@@ -151,8 +163,12 @@ def score_episode(episode: dict, thresholds: dict | None = None) -> tuple[float,
     """
     base = _outcome_score(episode)
     eff = _efficiency_bonus(episode, thresholds)
-    cache = _cache_bonus(episode)
-    score = max(0.0, min(1.0, base + eff + cache))
+    # cache_ratio is exposed in side_info only, NOT in the score formula.
+    # Cache hit ratio reflects session input structure, not skill quality —
+    # a skill identical to the previous iteration inherits its predecessor's
+    # cache state and would receive a bonus regardless of quality.
+    # The reflection LM can use cache_ratio qualitatively as a verbosity signal.
+    score = max(0.0, min(1.0, base + eff))
 
     side_info = {
         "score": score,
@@ -167,6 +183,7 @@ def score_episode(episode: dict, thresholds: dict | None = None) -> tuple[float,
         "token_stats": episode.get("token_stats", {}),
         "task_prompt": episode.get("task_prompt", "")[:200],
         "final_assistant_msg": (episode.get("assistant_text") or [""])[-1][:400],
+        "cache_ratio": _compute_cache_ratio(episode),
     }
     side_info["feedback"] = _build_feedback(episode, side_info)
     return score, side_info
@@ -207,8 +224,11 @@ def llm_judge_score(
 
     asi = episode_to_asi(episode)
 
+    # Truncate to 8000 chars to expose the full ~2K-token SKILL.md to the judge.
+    # Future work: implement two-pass scoring (split candidate at midpoint, judge
+    # each half, average the scores) to handle skills > 8000 chars without bias.
     user_msg = (
-        f"SKILL.md:\n{candidate_skill[:3000]}\n\n"
+        f"SKILL.md:\n{candidate_skill[:8000]}\n\n"
         f"Episode:\n{asi[:2000]}\n\n"
         'Output: {"score": <0-1>, "reasoning": "<one sentence>"}'
     )
@@ -239,7 +259,7 @@ def make_replay_evaluator(
     episodes: list[dict],
     use_llm_judge: bool = False,
     judge_lm: str = "anthropic/claude-haiku-4-5-20251001",
-    judge_weight: float = 0.4,
+    judge_weight: float = 0.65,  # LLM judge is the primary semantic signal; heuristic score is compressed in [0.35, 0.85]
     tool_call_thresholds: dict | None = None,
 ):
     """
@@ -263,7 +283,11 @@ def make_replay_evaluator(
             judge_reasoning = side_info.get("judge_reasoning", "")
             if judge_reasoning:
                 existing = side_info.get("feedback", "")
-                side_info["feedback"] = f"{existing} Judge: {judge_reasoning[:200]}" if existing else f"Judge: {judge_reasoning[:200]}"
+                side_info["feedback"] = (
+                    f"{existing} Judge: {judge_reasoning[:200]}"
+                    if existing
+                    else f"Judge: {judge_reasoning[:200]}"
+                )
         else:
             final_score = heuristic_score
 

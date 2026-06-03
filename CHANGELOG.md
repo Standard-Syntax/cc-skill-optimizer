@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--phase` CLI flag to `optimize.py`:
   - `--phase 1` (default): Synthetic exploration mode, 100 evals, 4-thread parallel evaluation
   - `--phase 2`: Session-backed refinement, 60 evals (requires existing session logs)
+- `skip_paths` parameter to `build_corpus()` for cumulative dedup across watch sessions
+- `neutral_closing` field in episode dict — scores unknown outcomes with files written at ~0.7
 
 ### Changed
 - **GEPA reflection feedback**: Evaluators now populate `side_info["feedback"]` with natural-language diagnostic strings instead of just numeric scores. Reflection LM receives actionable feedback (e.g., "EACCES: permission denied" → "skill should warn about permission issues")
@@ -19,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Conservative outcome inference**: Ambiguous sessions now score 0.5 (was 1.0). Uses `POSITIVE_COMPLETION_SIGNALS` for safer inference
 - **Section parser idempotency**: `_heading_<key>` metadata enables round-trip across GEPA iterations without drift
 - **LLM configuration**: Updated from Anthropic models to MiniMax models. `DEFAULT_MODEL` is now `minimax/minimax-m2.7-highspeed`, `REFLECTION_MODEL` is now `minimax/minimax-m3`. Base URL now includes `/v1` suffix (`https://api.minimax.io/anthropic/v1`)
+- **LLM judge context**: Truncation raised from 3000 to 8000 chars for full skill visibility
+- **`oa.log()` ASI channel**: 6 diagnostic calls (outcome, duration, errors, tool calls, compaction, judge score) flow to reflection LM via `oa.get_log_context().drain()`
+- **DSPy MIPROv2 extraction**: Optimized instructions and few-shot demos injected into output skill
+- **Judge weight**: Standardized to 0.65 in both replay and synthetic evaluators
+- **`llm_config.configure()`**: Must now be called explicitly (no module-level side effect)
+- **Subagent scanning**: Now scans both top-level JSONLs and `project_dir/subagents/agent-*.jsonl`
+- **Size stability check**: Two-poll size tracking replaces mtime guard for file stability
 
 ### Fixed
 - token_stats double-counting in `parse_session.py` (deduplicates by message.id)
@@ -27,9 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DSPy extraction warning when no DSPy signatures found
 - Regex pre-compilation in `synthetic_evaluator.py`
 - Backup file rotation (max 5 backups) in `watch_and_learn.py`
+- `--max-evals` CLI override was silently ignored (now works)
+- Heading de-collision with `_2`, `_3` suffixes
+- Section parser whitespace stripping to prevent round-trip accumulation
+- Nested evaluator prefers root keys (no `/`) over nested
 
 ### Removed
 - MIPROv2 docstring references (replaced with direct GEPA configuration)
+- `_cache_bonus` from score formula (exposed via `side_info["cache_ratio"]` instead)
 
 ---
 

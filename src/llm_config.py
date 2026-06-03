@@ -198,6 +198,3 @@ def configure() -> None:
         os.environ.pop(var, None)
 
     os.environ["ANTHROPIC_API_KEY"] = key
-
-
-configure()

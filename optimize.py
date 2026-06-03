@@ -162,7 +162,7 @@ except ImportError:
     _src_path = str(Path(__file__).parent / "src")
     if _src_path not in sys.path:
         sys.path.insert(0, _src_path)
-    import llm_config  # noqa: F401 — side-effect: sets env vars for all LiteLLM calls
+    import llm_config  # noqa: F401 — provides DEFAULT_MODEL, REFLECTION_MODEL, THINKING_CONFIG_* constants
     from evaluator import make_replay_evaluator  # noqa: F401
     from llm_config import (  # noqa: F401
         DEFAULT_MODEL,
@@ -187,6 +187,37 @@ except ImportError:
         make_dspy_synthetic_pipeline,
         make_synthetic_evaluator,
     )
+
+# ---------------------------------------------------------------------------
+# DSPy thinking guard
+# ---------------------------------------------------------------------------
+
+
+def _model_uses_thinking(model_str: str) -> bool:
+    """
+    Return True if the model is configured with extended thinking per llm_config.py.
+
+    Extended thinking is INCOMPATIBLE with the temperature kwarg in dspy.LM calls.
+    Per llm_config.py lines 99-105: passing temperature with thinking enabled
+    causes an API error at the first request. This helper detects which models
+    are currently wired to use thinking configs so that run_dspy_gepa can fail
+    fast rather than crash at the first inference call.
+
+    Current thinking-enabled model roster (update as new models are added):
+      - minimax/minimax-m3          → THINKING_CONFIG_REFLECTION (thinking enabled)
+      - minimax/minimax-m2.7        → THINKING_CONFIG_M2_7        (thinking enabled)
+      - minimax/minimax-m2.7-highspeed → THINKING_CONFIG_M2_7   (thinking enabled)
+
+    Models that use THINKING_CONFIG_EVAL (thinking disabled) are NOT included:
+      - anthropic/claude-haiku-4-5-20251001
+    """
+    thinking_enabled_models = (
+        "minimax/minimax-m3",
+        "minimax/minimax-m2.7",
+        "minimax/minimax-m2.7-highspeed",
+    )
+    return any(model_str.startswith(prefix) for prefix in thinking_enabled_models)
+
 
 # ---------------------------------------------------------------------------
 # Dataset helpers
@@ -666,8 +697,12 @@ def make_nested_evaluator(
         # Extract the primary file content for scoring
         primary_text = candidate.get(root_key) or ""
         if not primary_text and candidate:
-            # Fall back to the shortest file (likely the most focused)
-            fallback_key = min(candidate, key=lambda k: len(candidate[k]))
+            # Fallback: prefer root-level files (no "/" in key) — these are the
+            # primary context files (CLAUDE.md, AGENTS.md, SKILL.md). Then fall
+            # back to alphabetical order. The shortest-file heuristic was flawed:
+            # the shortest file is often a stub or minimal subsection config.
+            root_keys = [k for k in candidate if "/" not in k]
+            fallback_key = sorted(root_keys)[0] if root_keys else sorted(candidate)[0]
             primary_text = candidate[fallback_key]
 
         score, side_info = base_evaluator(primary_text, example)
@@ -851,7 +886,9 @@ def run_gepa_optimize_anything(
         background=background,
         config=GEPAConfig(
             engine=EngineConfig(
-                max_metric_calls=max_evals_override if max_evals_override is not None else max_metric_calls,
+                max_metric_calls=max_evals_override
+                if max_evals_override is not None
+                else max_metric_calls,
                 cache_evaluation=True,
                 parallel=True,  # Replay evaluator is stateless → parallelise metric evaluation across episodes.
                 max_workers=GEPA_NUM_THREADS_DEFAULT,
@@ -949,6 +986,27 @@ def run_dspy_gepa(
     """
     import dspy
     from dspy.teleprompt import MIPROv2
+
+    # Guard: temperature is incompatible with extended thinking per llm_config.py.
+    # The dspy.LM constructor below passes temperature=0.7 (task) and temperature=1.0
+    # (reflection). If either model is configured with extended thinking, the API call
+    # will fail at runtime. This guard fails fast with a clear error rather than
+    # crashing at the first inference request.
+    #
+    # NOTE: This guard WILL fire for the current default models
+    # (task_lm=DEFAULT_MODEL="minimax/minimax-m2.7-highspeed",
+    #  reflection_lm=REFLECTION_MODEL="minimax/minimax-m3") because both are
+    # thinking-enabled models. This is the intended safety behavior: the user must
+    # explicitly acknowledge the conflict by either disabling thinking on those models
+    # or removing the temperature kwarg from the dspy.LM calls below.
+    if _model_uses_thinking(task_lm) or _model_uses_thinking(reflection_lm):
+        raise ValueError(
+            f"DSPy runner cannot combine temperature with extended thinking. "
+            f"task_lm={task_lm!r} reflection_lm={reflection_lm!r} — at least one model "
+            f"uses extended thinking. Either disable thinking on these models, or modify "
+            f"run_dspy_gepa to construct dspy.LM objects WITHOUT the temperature kwarg "
+            f"when thinking is enabled. See src/llm_config.py lines 99-105 for the conflict."
+        )
 
     # Configure DSPy LMs
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
@@ -1129,7 +1187,9 @@ def run_gepa_synthetic(
         background=background,
         config=GEPAConfig(
             engine=EngineConfig(
-                max_metric_calls=max_evals_override if max_evals_override is not None else max_metric_calls,
+                max_metric_calls=max_evals_override
+                if max_evals_override is not None
+                else max_metric_calls,
                 cache_evaluation=True,
                 parallel=True,  # Synthetic evaluator is stateless → parallelise metric evaluation across tasks.
                 max_workers=GEPA_NUM_THREADS_DEFAULT,
@@ -1206,6 +1266,16 @@ def run_gepa_synthetic(
 
 
 def main() -> None:
+    # Explicit opt-in: configure the MiniMax Anthropic-compatible endpoint for
+    # all subsequent litellm calls in this process. Tests that import this
+    # module without invoking main() will use the real Anthropic endpoint.
+    from llm_config import configure
+
+    try:
+        configure()
+    except EnvironmentError as exc:
+        print(f"[optimize] ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
     ap = argparse.ArgumentParser(
         description="Optimize Claude Code SKILL.md / CLAUDE.md / AGENTS.md via GEPA + DSPy",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1302,7 +1372,12 @@ def main() -> None:
     )
 
     # Optimization engine
-    ap.add_argument("--max-evals", type=int, default=100, help="Maximum GEPA metric calls")
+    ap.add_argument(
+        "--max-evals",
+        type=int,
+        default=None,
+        help="Maximum GEPA metric calls (default: 100 for phase 1, 60 for phase 2)",
+    )
     ap.add_argument(
         "--task-lm", default=DEFAULT_MODEL, help="LM for task evaluation and task generation"
     )
@@ -1342,6 +1417,9 @@ def main() -> None:
     else:  # phase 2
         _gepa_frontier_type = "population"
         _gepa_default_max_evals = 60
+
+    # Honor user --max-evals override; fall back to phase default only if user did not pass --max-evals
+    effective_max_evals = args.max_evals if args.max_evals is not None else _gepa_default_max_evals
 
     # ------------------------------------------------------------------ #
     # Load seed — multi-target uses a dict from --skill-dir,
@@ -1475,8 +1553,8 @@ def main() -> None:
                 seed_candidate=seed_candidate,
                 task_lm=args.task_lm,
                 reflection_lm=args.reflection_lm,
-                max_bootstrap_evals=max(10, args.max_evals // 4),
-                max_gepa_evals=args.max_evals,
+                max_bootstrap_evals=max(10, effective_max_evals // 4),
+                max_gepa_evals=effective_max_evals,
                 output_dir=str(output_dir),
             )
         else:
@@ -1486,7 +1564,7 @@ def main() -> None:
                 val_tasks=val_tasks,
                 objective=objective,
                 background=background,
-                max_metric_calls=args.max_evals,
+                max_metric_calls=effective_max_evals,
                 reflection_lm=args.reflection_lm,
                 output_dir=output_dir,
                 judge_lm=args.judge_lm,
@@ -1496,7 +1574,7 @@ def main() -> None:
                 is_nested=(args.target == "nested"),
                 nested_root=nested_root,
                 frontier_type=_gepa_frontier_type,
-                max_evals_override=_gepa_default_max_evals,
+                max_evals_override=effective_max_evals,
             )
 
     else:
@@ -1546,7 +1624,7 @@ def main() -> None:
                 train_set=train_set,
                 val_set=val_set,
                 objective=objective,
-                max_metric_calls=args.max_evals,
+                max_metric_calls=effective_max_evals,
                 task_lm=args.task_lm,
                 reflection_lm=args.reflection_lm,
                 output_dir=output_dir,
@@ -1558,7 +1636,7 @@ def main() -> None:
                 val_set=val_set,
                 objective=objective,
                 background=background,
-                max_metric_calls=args.max_evals,
+                max_metric_calls=effective_max_evals,
                 task_lm=args.task_lm,
                 reflection_lm=args.reflection_lm,
                 output_dir=output_dir,
@@ -1571,7 +1649,7 @@ def main() -> None:
                 is_nested=(args.target == "nested"),
                 nested_root=Path(args.nested_root) if args.nested_root else None,
                 frontier_type=_gepa_frontier_type,
-                max_evals_override=_gepa_default_max_evals,
+                max_evals_override=effective_max_evals,
             )
 
     print("\n" + "=" * 60)

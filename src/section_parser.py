@@ -74,6 +74,20 @@ def _normalize_key(heading: str, parent_key: str = "") -> str:
     return f"section_{slug}" if slug else ""
 
 
+def _make_unique_key(base_key: str, existing_keys: set[str]) -> str:
+    """
+    If base_key already exists in existing_keys, append _2, _3, etc. until unique.
+    Used to prevent silent overwrites when two headings normalize to the same slug
+    (e.g., "## Key Patterns!" and "## Key Patterns?" both → "section_key_patterns_").
+    """
+    if base_key not in existing_keys:
+        return base_key
+    n = 2
+    while f"{base_key}_{n}" in existing_keys:
+        n += 1
+    return f"{base_key}_{n}"
+
+
 # ---------------------------------------------------------------------------
 # Core parser
 # ---------------------------------------------------------------------------
@@ -161,9 +175,9 @@ def parse_sections(
 
             if section_stack:
                 parent_key = section_stack[-1][1]
-                key = _normalize_key(heading, parent_key)
+                key = _make_unique_key(_normalize_key(heading, parent_key), set(sections))
             else:
-                key = _normalize_key(heading)
+                key = _make_unique_key(_normalize_key(heading), set(sections))
 
             current_key = key
             current_lines = [line]  # start new section (include heading line for nested mode)
@@ -267,7 +281,11 @@ def merge_sections(
         # Check for stored raw heading (preserves original casing)
         stored_heading = sections.get(f"_{key}_heading")
         if stored_heading:
-            parts.append(f"{stored_heading.rstrip()}\n{content}")
+            # Strip leading newlines from content to prevent round-trip accumulation.
+            # If the original content started with a blank line (paragraph break after
+            # the heading), each parse → merge cycle would add another blank line.
+            # lstrip(chr(10)) only removes newlines, preserving any other whitespace.
+            parts.append(f"{stored_heading.rstrip()}\n{content.lstrip(chr(10))}")
         else:
             # Extract heading from content if present (first line is the heading)
             lines = content.splitlines(keepends=True)
@@ -326,6 +344,7 @@ def build_section_tree(text: str, max_depth: int = 2) -> list[Section]:
     lines = text.splitlines(keepends=True)
     root: list[Section] = []
     stack: list[Section] = []
+    root_names: set[str] = set()  # Track root-level section names for de-collision
 
     for lineno, line in enumerate(lines, start=1):
         m = re.match(r"^(#{1,6})\s+(.+)$", line)
@@ -342,7 +361,15 @@ def build_section_tree(text: str, max_depth: int = 2) -> list[Section]:
         parent = stack[-1] if stack else None
         parent_list = parent.children if parent else root
 
-        name = _normalize_key(heading, parent.name if parent else "")
+        base_name = _normalize_key(heading, parent.name if parent else "")
+
+        # De-collide: ensure name is unique within the target list
+        if parent is None:
+            name = _make_unique_key(base_name, root_names)
+            root_names.add(name)
+        else:
+            sibling_names = {child.name for child in parent.children}
+            name = _make_unique_key(base_name, sibling_names)
 
         section = Section(
             level=level,
@@ -358,6 +385,7 @@ def build_section_tree(text: str, max_depth: int = 2) -> list[Section]:
     # Second pass: collect content between headings
     current: Section | None = None
     content_buffer: list[str] = []
+    current_section: Section | None = None  # Track the section created in first pass
 
     for lineno, line in enumerate(lines, start=1):
         m = re.match(r"^(#{1,6})\s+(.+)$", line)
@@ -370,10 +398,20 @@ def build_section_tree(text: str, max_depth: int = 2) -> list[Section]:
             while stack and stack[-1].level >= level:
                 stack.pop()
             current = stack[-1] if stack else None
+            # Find the subsection by looking through parent's children using the
+            # unique name we already assigned (avoid re-normalizing which could
+            # find a wrong section if there was a name collision)
             if current:
-                current = find_section(
-                    root, _normalize_key(heading, stack[-1].name if stack else "")
-                )
+                base_name = _normalize_key(heading, stack[-1].name if stack else "")
+                sibling_names = {child.name for child in current.children}
+                unique_name = _make_unique_key(base_name, sibling_names)
+                current_section = None
+                for child in current.children:
+                    if child.name == unique_name:
+                        current_section = child
+                        break
+                if current_section:
+                    current = current_section
             content_buffer = []
         else:
             if current is None:
