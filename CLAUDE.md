@@ -36,14 +36,14 @@ Optimizes Claude Code `SKILL.md`, `CLAUDE.md`, and `AGENTS.md` files using GEPA
 
 ## LLM Configuration
 
-This project routes all LLM calls through litellm to the MiniMax Anthropic-compatible endpoint (`https://api.minimax.io/anthropic`). The endpoint accepts standard Anthropic request formats with `anthropic/` model prefix.
+This project routes all LLM calls through litellm to the MiniMax Anthropic-compatible endpoint (`https://api.minimax.io/anthropic/v1`). The endpoint accepts standard Anthropic request formats with `anthropic/` model prefix.
 
 ### Model Constants (src/llm_config.py)
 
 | Constant | Value | Best Use |
 |----------|-------|----------|
-| `DEFAULT_MODEL` | `anthropic/claude-haiku-4-5-20251001` | Fast eval + judge calls (cheap, fast) |
-| `REFLECTION_MODEL` | `anthropic/claude-sonnet-4-6` | Deep reflection / GEPA mutation proposals |
+| `DEFAULT_MODEL` | `minimax/minimax-m2.7-highspeed` | Fast eval + judge calls (cheap, fast) |
+| `REFLECTION_MODEL` | `minimax/minimax-m3` | Deep reflection / GEPA mutation proposals |
 | `MINIMAX_M2_7` | `minimax/minimax-m2.7` | Skill generation, coding tasks needing 97% skill adherence |
 | `MINIMAX_M2_7_HIGHSPEED` | `minimax/minimax-m2.7-highspeed` | Faster M2.7 variant for iterative coding tasks |
 

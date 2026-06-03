@@ -74,7 +74,7 @@ try:
         THINKING_CONFIG_EVAL,
     )
 except ImportError:
-    DEFAULT_MODEL = "anthropic/claude-haiku-4-5-20251001"
+    DEFAULT_MODEL = "minimax/minimax-m2.7-highspeed"
     INFERENCE_PARAMS = {}
     EXTRA_BODY = {}
     EVAL_MAX_TOKENS = 512

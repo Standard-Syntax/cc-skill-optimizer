@@ -49,7 +49,7 @@ uv run python optimize.py \
     --project-filter banking \
     --max-evals 150 \
     --phase 1 \
-    --reflection-lm anthropic/claude-sonnet-4-6 \
+    --reflection-lm minimax/minimax-m3 \
     --output-dir outputs/
 ```
 
@@ -68,7 +68,7 @@ uv run python watch_and_learn.py \
     --skill-file /path/to/project/.claude/skills/banking/SKILL.md \
     --project-filter banking \
     --optimize-every 25 \
-    --reflection-lm anthropic/claude-sonnet-4-6
+    --reflection-lm minimax/minimax-m3
 
 # Run in background on your Debian/niri workstation:
 nohup uv run python watch_and_learn.py \
@@ -85,8 +85,8 @@ uv run python optimize.py \
     --seed-file skills/banking-analytics-seed.md \
     --project-filter banking \
     --max-evals 200 \
-    --task-lm anthropic/claude-haiku-4-5-20251001 \
-    --reflection-lm anthropic/claude-sonnet-4-6
+    --task-lm minimax/minimax-m2.7-highspeed \
+    --reflection-lm minimax/minimax-m3
 ```
 
 ### 4. Optimize CLAUDE.md (global project instructions)
@@ -260,12 +260,12 @@ litellm handles routing — use any model string it supports.
 
 | Use case | task_lm | reflection_lm | cost |
 |----------|---------|---------------|------|
-| Fast iteration | `anthropic/claude-haiku-4-5-20251001` | `anthropic/claude-sonnet-4-6` | Low |
-| High quality | `anthropic/claude-sonnet-4-6` | `anthropic/claude-opus-4-6` | High |
-| Cheap reflection | `anthropic/claude-haiku-4-5-20251001` | `anthropic/claude-haiku-4-5-20251001` | Very low |
-| Skill generation (M2.7) | `minimax/minimax-m2.7` | `anthropic/claude-sonnet-4-6` | Very low ($0.30/M) |
+| Fast iteration | `minimax/minimax-m2.7-highspeed` | `minimax/minimax-m3` | Low |
+| High quality | `minimax/minimax-m3` | `minimax/minimax-m3` | High |
+| Cheap reflection | `minimax/minimax-m2.7-highspeed` | `minimax/minimax-m2.7-highspeed` | Very low |
+| Skill generation (M2.7) | `minimax/minimax-m2.7` | `minimax/minimax-m3` | Very low ($0.30/M) |
 
-> **MiniMax M2.7** excels at skill generation tasks requiring high adherence (97%) with low hallucination (34%), but is verbose (4× average tokens) and slow (~50 tps). Use Haiku for eval/judge calls — never route high-throughput eval traffic through M2.7. For pure coding tasks, `minimax/minimax-m2.7-highspeed` offers a faster variant.
+> **MiniMax M2.7** excels at skill generation tasks requiring high adherence (97%) with low hallucination (34%), but is verbose (4× average tokens) and slow (~50 tps). Use M2.7-highspeed for eval/judge calls — never route high-throughput eval traffic through M2.7.
 
 ### GEPA budget guidance
 
@@ -347,16 +347,27 @@ def my_evaluate(candidate: str, example: dict) -> tuple[float, dict]:
 
 ## Changelog
 
-### Phase 1 (2026-06)
+### Phase 1 (2026-06-03) — Code Review Remediation
 
-- Added `--phase` flag to `optimize.py`:
-  - `--phase 1` (default): Synthetic exploration, 100 evals, parallel evaluation (4 threads)
+- **Added `--phase` flag** to `optimize.py`:
+  - `--phase 1` (default): Synthetic exploration, 100 evals, 4-thread parallel evaluation
   - `--phase 2`: Session-backed refinement, 60 evals (requires session logs)
-- Performance improvements: Parallel GEPA evaluation (`parallel=True`, 4 threads), parallel worker pool for evaluator
-- New `src/utils.py` module with shared helper functions
-- GEPA evaluators now populate `side_info["feedback"]` with diagnostic strings
-- New module-level constants: `GEPA_NUM_THREADS_DEFAULT`, minibatch sizes, caching flags
-- Evaluators now accept `tool_call_thresholds` kwarg for customization
+- **Performance improvements**: `EngineConfig parallel=True` reduces wall time 4-8x
+- **New `src/utils.py`**: Shared `_parse_llm_json` helper function
+- **GEPA reflection feedback**: Evaluators now populate `side_info["feedback"]` with natural-language diagnostic strings (not just numeric scores)
+- **Conservative outcome inference**: Ambiguous sessions now score 0.5 (was 1.0). Uses `POSITIVE_COMPLETION_SIGNALS`
+- **Configurable tool-call thresholds**: Evaluators accept `tool_call_thresholds` kwarg
+- **Section parser idempotency**: `_heading_<key>` metadata enables round-trip across GEPA iterations
+
+**Bug fixes (27 issues across 7 source files):**
+- token_stats double-counting deduplicated by message.id
+- multi-evaluator temp dir scoping corrected
+- NESTED_ROOT now fetched from CLI arg (was hardcoded)
+- DSPy extraction warning when no signatures found
+- Regex pre-compilation in synthetic_evaluator.py
+- Backup file rotation (max 5 backups)
+
+**All tests pass**: 102/102, zero regressions
 
 ### Earlier Versions
 

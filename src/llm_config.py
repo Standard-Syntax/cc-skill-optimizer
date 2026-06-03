@@ -52,23 +52,22 @@ Thinking × inference parameters: incompatibilities
 
 Model recommendations (as of May 2026)
 ----------------------------------------
-  claude-sonnet-4-6  → adaptive thinking recommended
-                       (`type: "adaptive"` + effort parameter)
-                       Manual `type: "enabled"` still works but deprecated.
-  claude-haiku-4-5   → no adaptive thinking; use `type: "enabled"` if needed,
-                        or disable thinking for fast evaluation calls.
+  minimax/minimax-m2.7-highspeed  → fast student/eval/judge calls
+                        adaptive thinking with low effort recommended.
+                        Strengths: 97% skill adherence, low hallucination.
+                        Use for: skill generation, eval, judge calls.
+  minimax/minimax-m3  → deep reflection and GEPA mutation proposals.
+                        adaptive thinking recommended (medium effort).
+                        Use for: reflection, high-quality synthesis.
 
 Endpoint routing
 ----------------
   GEPA's internal litellm.completion() uses the model string to route.
-  Using `anthropic/` prefix with ANTHROPIC_API_KEY set routes to the configured
-  ANTHROPIC_BASE_URL. When ANTHROPIC_BASE_URL is set to MiniMax's endpoint
-  (https://api.minimax.io/anthropic), litellm routes requests through MiniMax's
-  Anthropic-compatible API.
-
-  The same model strings (anthropic/claude-haiku-4-5-20251001,
-  anthropic/claude-sonnet-4-6) are used — MiniMax's endpoint accepts standard
-  Anthropic request formats.
+  Using `minimax/` prefix routes directly through MiniMax's provider.
+  ANTHROPIC_BASE_URL must include the /v1 suffix
+  (https://api.minimax.io/anthropic/v1) so litellm routes correctly.
+  MiniMax's endpoint accepts standard Anthropic request formats with these
+  model strings: minimax/minimax-m2.7-highspeed, minimax/minimax-m3.
 """
 
 from __future__ import annotations
@@ -79,12 +78,12 @@ import os
 # Anthropic endpoint + models
 # ---------------------------------------------------------------------------
 # MiniMax Anthropic-compatible endpoint
-ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
+ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic/v1"
 
 # Sonnet 4.6: adaptive thinking recommended; best balance of speed and quality
 # Haiku 4.5: fastest and cheapest; use for evaluation/judge calls
-DEFAULT_MODEL = "anthropic/claude-haiku-4-5-20251001"  # fast eval + judge
-REFLECTION_MODEL = "anthropic/claude-sonnet-4-6"  # deep reflection
+DEFAULT_MODEL = "minimax/minimax-m2.7-highspeed"  # student / eval / judge calls
+REFLECTION_MODEL = "minimax/minimax-m3"  # deep reflection / GEPA mutation proposals
 
 # MiniMax M2.7 — for skill generation and coding optimization
 # Strengths: 97% skill adherence, 34% hallucination (low), SWE-Pro 56.22%, cost $0.30/M
