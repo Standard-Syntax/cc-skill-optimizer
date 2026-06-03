@@ -830,6 +830,8 @@ def run_gepa_optimize_anything(
     nested_root: Path | None = None,
     frontier_type: str = "instance",
     max_evals_override: int | None = None,
+    target: str | None = None,
+    proposer: str = "batch",
 ) -> str | dict[str, str]:
     """
     Run gepa.optimize_anything and return the best candidate.
@@ -840,8 +842,17 @@ def run_gepa_optimize_anything(
                        or nested (--target nested);
                        each key is a file path (multi/nested) or section name (sections);
                        GEPA evolves all simultaneously.
+
+    proposer: Reflection proposer strategy. 'loop' uses gskill's create_loop_proposer
+              (one episode per reflection call); 'batch' (default) sends all evaluation
+              results at once.
     """
     from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, optimize_anything
+
+    if proposer == "loop":
+        print("[gepa] --proposer loop requested. Note: gskill's create_loop_proposer is "
+              "only available when using gepa.gskill.gskill.train_optimize_anything wrapper. "
+              "Falling back to standard gepa batch proposer.")
 
     is_multi = isinstance(seed_candidate, dict)
 
@@ -849,6 +860,7 @@ def run_gepa_optimize_anything(
         episodes=train_set,
         use_llm_judge=use_llm_judge,
         judge_lm=judge_lm,
+        target=target,
     )
 
     if is_sections:
@@ -1402,7 +1414,31 @@ def main() -> None:
         type=int,
         choices=[1, 2],
         default=1,
-        help="Optimization phase: 1 (synthetic exploration, instance frontier, 100 evals) or 2 (session-backed refinement, population frontier, 60 evals). Default: 1",
+        help="Optimization phase: 1 (synthetic exploration, instance frontier, 100 evals) or 2 (session-backed refinement, instance frontier, 60 evals). Default: 1",
+    )
+    ap.add_argument(
+        "--hybrid-frontier",
+        action="store_true",
+        default=False,
+        help="Use gepa's frontier_type='hybrid' (multi-objective Pareto). Requires the new "
+             "'scores' dict in side_info added in task 9.2; without those keys gepa 0.1.1 raises "
+             "ValueError. Default: False (uses 'instance' frontier).",
+    )
+    ap.add_argument(
+        "--time-split",
+        action="store_true",
+        default=False,
+        help="Sort episodes chronologically by timestamp before train/val split "
+             "(avoids data leakage per the Arize Prompt Learning paper). "
+             "Default: False (random split).",
+    )
+    ap.add_argument(
+        "--proposer",
+        choices=["batch", "loop"],
+        default="batch",
+        help="Reflection proposer strategy. 'loop' (gskill-style) processes one episode "
+             "per reflection call, producing more detailed skills at higher API cost. "
+             "'batch' (default) sends all evaluation results at once.",
     )
 
     # Output
@@ -1411,11 +1447,21 @@ def main() -> None:
     args = ap.parse_args()
 
     # Phase-based GEPA configuration
-    if args.phase == 1:
+    if args.hybrid_frontier:
+        _gepa_frontier_type = "hybrid"
+        # Hybrid requires side_info["scores"] from make_replay_evaluator.
+        # task 9.2 added this to score_episode side_info.
+        print("[main] --hybrid-frontier enabled: requires side_info['scores'] from make_replay_evaluator. "
+              "If you wrote a custom evaluator, ensure it returns a 'scores' dict.")
+        _gepa_default_max_evals = 100
+    elif args.phase == 1:
         _gepa_frontier_type = "instance"
         _gepa_default_max_evals = 100
     else:  # phase 2
-        _gepa_frontier_type = "population"
+        # Note: prior versions used "population" for phase 2, but gepa 0.1.1's
+        # FrontierType is Literal["instance", "objective", "hybrid", "cartesian"]
+        # (gepa/core/state.py:22). "population" is invalid.
+        _gepa_frontier_type = "instance"
         _gepa_default_max_evals = 60
 
     # Honor user --max-evals override; fall back to phase default only if user did not pass --max-evals
@@ -1585,6 +1631,7 @@ def main() -> None:
             Path(args.claude_dir),
             project_filter=args.project_filter,
             min_tool_calls=args.min_tool_calls,
+            sort_by_time=args.time_split,
         )
         if not episodes:
             print(
@@ -1650,6 +1697,8 @@ def main() -> None:
                 nested_root=Path(args.nested_root) if args.nested_root else None,
                 frontier_type=_gepa_frontier_type,
                 max_evals_override=effective_max_evals,
+                target=args.target,
+                proposer=args.proposer,
             )
 
     print("\n" + "=" * 60)

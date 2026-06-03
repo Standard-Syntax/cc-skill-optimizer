@@ -37,9 +37,19 @@ never dominates the blend.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
+
+# PyYAML >= 6.0 for YAML validation gate (--target agent)
+try:
+    import yaml
+
+    _YAML_AVAILABLE = True
+except ImportError:
+    yaml = None  # type: ignore
+    _YAML_AVAILABLE = False
 
 # Import llm_config constants (also sets env vars as side-effect)
 try:
@@ -85,6 +95,7 @@ def _build_feedback(episode: dict, side_info: dict) -> str:
     outcome = episode.get("outcome", "unknown")
     errs = side_info.get("error_messages", [])
     n_tools = side_info.get("n_tool_calls", 0)
+    n_errors = side_info.get("n_errors", 0)
     compaction = side_info.get("compaction", False)
 
     if outcome == "error" and errs:
@@ -101,6 +112,21 @@ def _build_feedback(episode: dict, side_info: dict) -> str:
         parts.append(
             "Session ended before agent completed; review whether the skill guided the agent to a clear stopping point."
         )
+
+    # Bash command sequence (first 12 commands)
+    bash_cmds = episode.get("bash_commands") or []
+    if bash_cmds:
+        parts.append(f"Commands run: {'; '.join(bash_cmds[:12])}")
+
+    # Files touched (first 8 files)
+    files = episode.get("files_written") or []
+    if files:
+        parts.append(f"Files touched: {', '.join(files[:8])}")
+
+    # Distinct error count (when n_errors > 1)
+    if n_errors > 1:
+        parts.append(f"{n_errors} distinct errors encountered.")
+
     if not parts:
         parts.append(f"Outcome: {outcome}. No specific failure detected.")
     return " ".join(parts)
@@ -170,20 +196,34 @@ def score_episode(episode: dict, thresholds: dict | None = None) -> tuple[float,
     # The reflection LM can use cache_ratio qualitatively as a verbosity signal.
     score = max(0.0, min(1.0, base + eff))
 
+    # scores dict for multi-objective Pareto tracking (gepa 0.1.1 reads side_info["scores"])
+    scores = {
+        "outcome": base,
+        "efficiency": (eff + 0.15) / 0.30,
+        "cache_efficiency": _compute_cache_ratio(episode),
+        "low_error_rate": 1.0 if not episode.get("error_messages") else 0.0,
+    }
+
+    # Truncation limits increased from prior values to give the reflection LM
+    # more context per the gskill SI design pattern. The gskill paper reports
+    # the reflection LM benefits most from full tool_calls and complete test
+    # output, not just the first few. These larger limits are appropriate for
+    # the small corpora (20-50 episodes) the project targets.
     side_info = {
         "score": score,
         "outcome": episode.get("outcome"),
         "n_tool_calls": len(episode.get("tool_calls", [])),
         "n_errors": len(episode.get("error_messages", [])),
         "duration_s": episode.get("duration_s"),
-        "error_messages": episode.get("error_messages", [])[:3],
-        "bash_commands": episode.get("bash_commands", [])[:8],
-        "files_written": episode.get("files_written", [])[:6],
+        "error_messages": episode.get("error_messages", [])[:10],
+        "bash_commands": episode.get("bash_commands", [])[:20],
+        "files_written": episode.get("files_written", [])[:20],
         "compaction": episode.get("compaction_summary") is not None,
         "token_stats": episode.get("token_stats", {}),
         "task_prompt": episode.get("task_prompt", "")[:200],
-        "final_assistant_msg": (episode.get("assistant_text") or [""])[-1][:400],
+        "final_assistant_msg": (episode.get("assistant_text") or [""])[-1][:2000],
         "cache_ratio": _compute_cache_ratio(episode),
+        "scores": scores,
     }
     side_info["feedback"] = _build_feedback(episode, side_info)
     return score, side_info
@@ -255,24 +295,70 @@ def llm_judge_score(
 # ---------------------------------------------------------------------------
 
 
+def _check_yaml_validity(candidate: str) -> tuple[bool, str | None]:
+    """
+    Check that any YAML code blocks in the candidate are parseable.
+    Returns (is_valid, error_message). When is_valid is False, error_message is set.
+    Markdown without YAML blocks returns (True, None) — no YAML means no validation needed.
+    """
+    if not _YAML_AVAILABLE:
+        return True, None  # Skip validation if PyYAML is not installed
+    # Match ```yaml ... ``` and ```yml ... ``` blocks
+    pattern = re.compile(r"^```(?:yaml|yml)\s*\n(.*?)\n```", re.MULTILINE | re.DOTALL)
+    blocks = pattern.findall(candidate)
+    if not blocks:
+        return True, None  # No YAML blocks; valid by default
+    for i, block in enumerate(blocks):
+        try:
+            yaml.safe_load(block)
+        except yaml.YAMLError as e:
+            return False, f"YAML block {i+1} failed to parse: {e}"
+    return True, None
+
+
 def make_replay_evaluator(
     episodes: list[dict],
     use_llm_judge: bool = False,
     judge_lm: str = "anthropic/claude-haiku-4-5-20251001",
     judge_weight: float = 0.65,  # LLM judge is the primary semantic signal; heuristic score is compressed in [0.35, 0.85]
     tool_call_thresholds: dict | None = None,
+    target: str | None = None,
 ):
     """
     Returns a GEPA-compatible evaluate(candidate, example) function.
 
     candidate: str  — the skill/CLAUDE.md content being optimized
     example:   dict — one episode from the corpus (from dataset= arg to optimize_anything)
+
+    side_info: dict with keys 'score', 'outcome', 'scores' (multi-objective Pareto dict for
+        gepa 0.1.1), and other diagnostic fields. The 'scores' key contains 4 normalized [0,1]
+        values: 'outcome', 'efficiency', 'cache_efficiency', 'low_error_rate'. Required for
+        frontier_type='hybrid' or 'objective' (gepa 0.1.1 reads side_info['scores']).
     """
     thresholds = tool_call_thresholds or DEFAULT_TOOL_CALL_THRESHOLDS
 
     def evaluate(candidate: str, example: dict) -> tuple[float, dict]:
+        # YAML validation gate (--target agent only)
+        _yaml_valid = None
+        _yaml_error = None
+        if target == "agent":
+            yaml_valid, yaml_error = _check_yaml_validity(candidate)
+            _yaml_valid = yaml_valid
+            _yaml_error = yaml_error
+            if not yaml_valid:
+                return 0.0, {
+                    "yaml_valid": False,
+                    "yaml_error": yaml_error,
+                    "score": 0.0,
+                    "feedback": f"YAML validation failed: {yaml_error}",
+                }
+
         # Heuristic score (fast, free)
         heuristic_score, side_info = score_episode(example, thresholds)
+
+        # Mark YAML as valid (gate passed for agent target)
+        if target == "agent":
+            side_info["yaml_valid"] = True
 
         if use_llm_judge:
             judge_score, reasoning = llm_judge_score(candidate, example, judge_lm)

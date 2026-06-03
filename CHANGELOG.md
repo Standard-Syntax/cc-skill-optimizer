@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Phase 10: Evaluator signal enhancements** (2026-06-03)
+  - Increased truncation limits in evaluator `side_info`: error_messages[:10], bash_commands[:20], files_written[:20], final_assistant_msg[:2000]
+  - Enriched `_build_feedback` with bash command sequence (first 12), files touched (first 8), distinct error count
+  - New YAML validation gate for `--target agent` with `_check_yaml_validity` helper
+  - New `--time-split` CLI flag (default False): sorts episodes chronologically by timestamp
+  - New `--proposer {batch,loop}` CLI flag (default batch): selects gepa 0.1.1 reflection proposer
+  - `sort_by_time` parameter in `build_corpus()` for chronological episode ordering
+  - Added `pyyaml>=6.0` dependency
+
+- **Phase 9: Multi-objective Pareto frontier** (2026-06-03)
+  - New `scores` dict in evaluator `side_info` with 4 normalized keys: outcome, efficiency, cache_efficiency, low_error_rate
+  - New `--hybrid-frontier` CLI flag: enables gepa 0.1.1 multi-objective Pareto tracking
+  - Fixed invalid `frontier_type="population"` → `"instance"` for Phase 2 (gepa 0.1.1 compatibility)
 - New `src/utils.py` module with shared `_parse_llm_json` helper function
 - `--phase` CLI flag to `optimize.py`:
   - `--phase 1` (default): Synthetic exploration mode, 100 evals, 4-thread parallel evaluation

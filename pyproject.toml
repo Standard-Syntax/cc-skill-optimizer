@@ -8,6 +8,7 @@ dependencies = [
     # Core optimizers
     "gepa>=0.1.1",
     "dspy>=2.6.0",
+    "pyyaml>=6.0",   # YAML validation gate for --target agent
 
     # LLM routing (gepa + dspy both use litellm under the hood)
     "litellm>=1.55.0",

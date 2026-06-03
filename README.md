@@ -56,6 +56,7 @@ uv run python optimize.py \
 **Phases:**
 - `--phase 1` (default): Synthetic exploration mode, 100 evals, 4-thread parallel evaluation
 - `--phase 2`: Session-backed refinement, 60 evals, requires existing session logs
+- `--hybrid-frontier`: When set, enables multi-objective Pareto frontier (tracks outcome, efficiency, cache_efficiency, low_error_rate)
 
 The optimized file lands at `outputs/skill/best_candidate.md`.
 Copy it to `.claude/skills/banking/SKILL.md` in your project.

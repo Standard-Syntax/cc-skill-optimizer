@@ -393,5 +393,115 @@ class TestFeedbackSynthesisEvaluator:
         assert "errors" not in fb.lower()  # no error mentioned
 
 
+# =======================================================================
+# YAML validation gate (--target agent)
+# =======================================================================
+
+
+class TestYamlValidationGate:
+    """Tests for the YAML validation gate in make_replay_evaluator (target='agent')."""
+
+    def test_invalid_yaml_returns_zero_score(self):
+        """A candidate with an unparseable YAML block returns score=0.0 with yaml_valid=False."""
+        from evaluator import make_replay_evaluator
+
+        ev_fn = make_replay_evaluator(episodes=[], target="agent")
+        candidate = "# AGENTS.md\n\n```yaml\nroles: [agent1, agent2\nbroken: [unclosed\n```\n"
+        score, side_info = ev_fn(candidate, {})
+        assert score == 0.0
+        assert side_info["yaml_valid"] is False
+        assert "yaml_error" in side_info
+
+    def test_valid_yaml_returns_normal_score(self):
+        """A candidate with valid YAML blocks returns a normal score (>= 0) with yaml_valid=True."""
+        from evaluator import make_replay_evaluator
+
+        ep = {
+            "outcome": "success",
+            "tool_calls": [],
+            "error_messages": [],
+            "bash_commands": [],
+            "files_written": [],
+        }
+        ev_fn = make_replay_evaluator(episodes=[ep], target="agent")
+        candidate = "# AGENTS.md\n\n```yaml\nroles:\n  - agent1\n  - agent2\n```\n"
+        score, side_info = ev_fn(candidate, ep)
+        assert score > 0.0
+        assert side_info.get("yaml_valid") is True  # present and True after valid YAML
+
+    def test_non_agent_target_skips_yaml_check(self):
+        """When target is not 'agent', the YAML check is skipped entirely (no yaml_valid key set on the early-return path)."""
+        from evaluator import make_replay_evaluator
+
+        ep = {"outcome": "success", "tool_calls": [], "error_messages": []}
+        ev_fn = make_replay_evaluator(episodes=[ep], target="skill")
+        # This candidate has invalid YAML, but target='skill' so validation should be skipped
+        candidate = "# SKILL.md\n\n```yaml\nbroken: [unclosed\n```\n"
+        score, side_info = ev_fn(candidate, ep)
+        # Should NOT return 0.0 from YAML gate
+        # Should return a normal score (heuristic_only = 1.0 for success outcome)
+        assert score == 1.0
+        # yaml_valid should not be set (validation was skipped)
+        assert "yaml_valid" not in side_info or side_info.get("yaml_valid") is True
+
+
+# =======================================================================
+# Task 10.4: sort_by_time parameter in build_corpus / sort_episodes_by_timestamp
+# =======================================================================
+
+
+class TestBuildCorpusSortByTime:
+    """Tests for sort_episodes_by_timestamp (task 10.4)."""
+
+    def test_sort_by_time_true_sorts_chronologically(self):
+        """When sort_by_time=True, episodes are sorted by timestamp ascending."""
+        from parse_session import sort_episodes_by_timestamp
+
+        episodes = [
+            {"timestamp": "2024-01-20T10:00:00+00:00", "outcome": "success"},
+            {"timestamp": "2024-01-10T10:00:00+00:00", "outcome": "success"},
+            {"timestamp": "2024-01-15T10:00:00+00:00", "outcome": "success"},
+        ]
+        result = sort_episodes_by_timestamp(episodes)
+        assert result[0]["timestamp"] == "2024-01-10T10:00:00+00:00"
+        assert result[1]["timestamp"] == "2024-01-15T10:00:00+00:00"
+        assert result[2]["timestamp"] == "2024-01-20T10:00:00+00:00"
+
+    def test_episodes_without_timestamp_sorted_to_end(self):
+        """Episodes without a timestamp field are placed at the end of the sorted list."""
+        from parse_session import sort_episodes_by_timestamp
+
+        episodes = [
+            {"timestamp": "2024-01-20T10:00:00+00:00", "outcome": "success"},
+            {"outcome": "success"},  # no timestamp
+            {"timestamp": "2024-01-10T10:00:00+00:00", "outcome": "success"},
+        ]
+        result = sort_episodes_by_timestamp(episodes)
+        # Timestamped episodes come first, in order
+        assert result[0]["timestamp"] == "2024-01-10T10:00:00+00:00"
+        assert result[1]["timestamp"] == "2024-01-20T10:00:00+00:00"
+        # No-timestamp episode is last
+        assert "timestamp" not in result[2]
+
+    def test_empty_list_returns_empty(self):
+        """Empty corpus returns empty list."""
+        from parse_session import sort_episodes_by_timestamp
+
+        result = sort_episodes_by_timestamp([])
+        assert result == []
+
+    def test_original_list_not_mutated(self):
+        """The original corpus is not mutated by sorting."""
+        from parse_session import sort_episodes_by_timestamp
+
+        original = [
+            {"timestamp": "2024-01-20T10:00:00+00:00", "outcome": "success"},
+            {"timestamp": "2024-01-10T10:00:00+00:00", "outcome": "success"},
+        ]
+        original_copy = list(original)
+        sort_episodes_by_timestamp(original)
+        assert original == original_copy
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

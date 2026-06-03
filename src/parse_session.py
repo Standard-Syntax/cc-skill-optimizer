@@ -385,6 +385,9 @@ def parse_session(path: Path) -> dict:
     if len(timestamps) >= 2:
         duration_s = (timestamps[-1] - timestamps[0]).total_seconds()
 
+    # Store first timestamp as ISO string for chronological sorting (task 10.4)
+    episode_timestamp: str | None = timestamps[0].isoformat() if timestamps else None
+
     return {
         "session_id": session_id,
         "task_prompt": task_prompt,
@@ -403,6 +406,7 @@ def parse_session(path: Path) -> dict:
         "skill_injections": skill_injections,
         "raw_lines": len(entries),
         "source_path": str(path),
+        "timestamp": episode_timestamp,
     }
 
 
@@ -425,6 +429,7 @@ def _empty_episode(session_id: str, path: Path) -> dict:
         "skill_injections": [],
         "raw_lines": 0,
         "source_path": str(path),
+        "timestamp": None,
     }
 
 
@@ -439,6 +444,7 @@ def build_corpus(
     min_tool_calls: int = 2,
     skip_empty_prompts: bool = True,
     skip_paths: set[str] | None = None,
+    sort_by_time: bool = False,
 ) -> list[dict]:
     """
     Load all sessions matching filters and return the parsed episode list.
@@ -453,6 +459,9 @@ def build_corpus(
                           (e.g. by watch_and_learn.py's cumulative known_files set).
                           Callers should pass the cumulative set across all
                           watch sessions to ensure files are parsed exactly once.
+        sort_by_time:      If True, sort episodes chronologically by timestamp
+                          before returning (task 10.4). Episodes without a
+                          timestamp are sorted to the end.
     """
     episodes: list[dict] = []
     skipped_count = 0
@@ -472,7 +481,28 @@ def build_corpus(
         f"[parse_session] Loaded {len(episodes)} episodes from {claude_dir}{skip_msg}",
         file=sys.stderr,
     )
+
+    if sort_by_time:
+        episodes = sort_episodes_by_timestamp(episodes)
+
     return episodes
+
+
+def sort_episodes_by_timestamp(corpus: list[dict]) -> list[dict]:
+    """
+    Sort episodes chronologically by timestamp (task 10.4).
+
+    Episodes without a timestamp are sorted to the end.
+    Returns a new list (does not mutate the input).
+
+    Args:
+        corpus: List of episode dicts, each with an optional "timestamp" field
+                (ISO format string or None).
+    """
+    with_ts = [e for e in corpus if e.get("timestamp")]
+    without_ts = [e for e in corpus if not e.get("timestamp")]
+    with_ts.sort(key=lambda e: e["timestamp"])
+    return with_ts + without_ts
 
 
 # ---------------------------------------------------------------------------
