@@ -5,20 +5,18 @@ Tests Task 5.2: extraction of optimized.assess.signature.instructions and demos
 Run: uv run pytest tests/test_5_2_dspy_extraction.py -v
 """
 
-import sys
 import os
+import sys
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import inspect
-from unittest import mock
-from pathlib import Path
-import tempfile
 import shutil
+import tempfile
+from unittest import mock
 
 import pytest
-
 
 # ============================================================================
 # Mock Classes

@@ -13,12 +13,10 @@ These tests confirm the fix is complete.
 """
 
 import argparse
-import sys
 from pathlib import Path
 from unittest import mock
 
 import pytest
-
 
 # ============================================================================
 # Helper: Simulate optimize.py main() logic
@@ -32,10 +30,7 @@ def compute_effective_max_evals(args_max_evals: int | None, phase: int) -> int:
     This is the FIX that was applied: computing effective_max_evals
     from args.max_evals OR phase default.
     """
-    if phase == 1:
-        _gepa_default_max_evals = 100
-    else:  # phase 2
-        _gepa_default_max_evals = 60
+    _gepa_default_max_evals = 100 if phase == 1 else 60
 
     # FIX: Use effective_max_evals, not args.max_evals
     effective_max_evals = args_max_evals if args_max_evals is not None else _gepa_default_max_evals
@@ -419,7 +414,7 @@ def test_old_bug_would_have_crashed():
 
     # This demonstrates the crash
     with pytest.raises(TypeError):
-        buggy_value = max(10, args_max_evals // 4)  # TypeError!
+        max(10, args_max_evals // 4)  # TypeError!
 
     # The FIX handles this:
     effective = compute_effective_max_evals(args_max_evals, phase=1)

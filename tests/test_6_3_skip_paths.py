@@ -18,10 +18,10 @@ import pytest
 
 # Ensure src/ is on the path
 _SRC = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(_SRC))
+sys.path.insert(0, str(_SRC))  # noqa: E402 — test path setup, must precede module import
 
-# Import after path setup
-from parse_session import build_corpus, iter_session_files
+# Intentional: import after sys.path.insert for path setup
+from parse_session import build_corpus, iter_session_files  # noqa: E402
 
 
 @pytest.fixture
@@ -157,7 +157,7 @@ def test_skip_paths_skips_a_single_file(tmp_session_dir):
     file_to_skip = str(all_files[0])
 
     with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
-        result = build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
+        build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
 
     # The result should have fewer items (or equal if files don't meet criteria)
     # We'll check by examining stderr output
@@ -165,7 +165,7 @@ def test_skip_paths_skips_a_single_file(tmp_session_dir):
     sys.stderr = StringIO()
     try:
         with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
-            result = build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
+            build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
         output = sys.stderr.getvalue()
     finally:
         sys.stderr = old_stderr
@@ -188,7 +188,7 @@ def test_skip_paths_skips_multiple_files(tmp_session_dir):
     sys.stderr = StringIO()
     try:
         with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
-            result = build_corpus(claude_dir=tmp_session_dir, skip_paths=files_to_skip)
+            build_corpus(claude_dir=tmp_session_dir, skip_paths=files_to_skip)
         output = sys.stderr.getvalue()
     finally:
         sys.stderr = old_stderr
@@ -206,7 +206,7 @@ def test_skip_paths_non_existent_path_silently_ignored(tmp_session_dir):
     sys.stderr = StringIO()
     try:
         with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
-            result = build_corpus(claude_dir=tmp_session_dir, skip_paths={non_existent})
+            build_corpus(claude_dir=tmp_session_dir, skip_paths={non_existent})
         output = sys.stderr.getvalue()
     finally:
         sys.stderr = old_stderr
@@ -276,9 +276,9 @@ def test_skip_paths_filtered_before_parse_session_called(tmp_session_dir):
         called_paths.append(str(path))
         return original_parse(path)
 
-    with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
-        with patch("parse_session.parse_session", side_effect=track_parse):
-            build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
+    with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir), \
+         patch("parse_session.parse_session", side_effect=track_parse):
+        build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
 
     assert file_to_skip not in called_paths, (
         f"parse_session should NOT be called for skipped file: {called_paths}"
@@ -333,7 +333,7 @@ def test_cumulative_usage_pattern(tmp_session_dir):
     try:
         with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
             result1 = build_corpus(claude_dir=tmp_session_dir)
-        output1 = sys.stderr.getvalue()
+        sys.stderr.getvalue()
     finally:
         sys.stderr = old_stderr
 
@@ -344,7 +344,7 @@ def test_cumulative_usage_pattern(tmp_session_dir):
     sys.stderr = StringIO()
     try:
         with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir):
-            result2 = build_corpus(claude_dir=tmp_session_dir, skip_paths=parsed_paths)
+            build_corpus(claude_dir=tmp_session_dir, skip_paths=parsed_paths)
         output2 = sys.stderr.getvalue()
     finally:
         sys.stderr = old_stderr

@@ -1197,10 +1197,8 @@ def make_dspy_synthetic_pipeline(
     out = _Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "best_candidate_dspy_synthetic.md").write_text(combined, encoding="utf-8")
-    try:
+    with contextlib.suppress(Exception):
         optimized.save(str(out / "dspy_synthetic_program.json"))
-    except Exception:
-        pass
     print(f"[dspy-synthetic] Saved to {out}/best_candidate_dspy_synthetic.md")
     return combined
 

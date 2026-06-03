@@ -10,19 +10,18 @@ Verifies:
 
 from __future__ import annotations
 
-import json
-import re
 import sys
 from pathlib import Path
 
 # Ensure src/ is on the path
 _SRC = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(_SRC))
+sys.path.insert(0, str(_SRC))  # noqa: E402 — test path setup, must precede module import
 
-import pytest
+# Intentional: import after sys.path.insert for path setup
+import pytest  # noqa: E402
 
-# Import after path setup
-import evaluator as ev
+# Intentional: import after sys.path.insert for path setup
+import evaluator as ev  # noqa: E402
 
 
 class TestCacheBonusRemoved:

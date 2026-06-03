@@ -8,12 +8,11 @@ that raises ValueError when either task_lm or reflection_lm uses extended thinki
 from __future__ import annotations
 
 import inspect
-import sys
+from contextlib import suppress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ============================================================================
 # Fixtures
@@ -190,8 +189,7 @@ def test_raises_when_reflection_lm_uses_thinking():
 
 def test_no_error_when_both_models_non_thinking():
     """Guard should NOT raise when both models are non-thinking."""
-    from optimize import run_dspy_gepa
-    from optimize import _model_uses_thinking
+    from optimize import _model_uses_thinking, run_dspy_gepa
 
     # First verify both models are indeed non-thinking (precondition)
     task_is_thinking = _model_uses_thinking("anthropic/claude-haiku-4-5-20251001")
@@ -351,7 +349,8 @@ def test_dspy_lm_kwargs_unchanged():
 
         mock_dspy.LM = capture_kwargs
 
-        try:
+        with suppress(Exception):
+            # May fail later, that's OK — we just check the guard didn't block early
             run_dspy_gepa(
                 seed_candidate="test skill",
                 train_set=SAMPLE_TRAIN_SET,
@@ -362,14 +361,12 @@ def test_dspy_lm_kwargs_unchanged():
                 reflection_lm="anthropic/claude-sonnet-4-6",
                 output_dir=Path("/tmp/test_output"),
             )
-        except Exception:
-            # May fail later, that's OK — we just check the guard didn't block early
-            pass
 
         # Check that temperature was in the LM calls (if we got that far)
         # At minimum, verify the temperature parameter is defined in the source
-        import optimize
         import inspect as ins
+
+        import optimize
 
         source = ins.getsource(optimize.run_dspy_gepa)
         assert "temperature=0.7" in source, "task_lm should still use temperature=0.7"

@@ -6,11 +6,13 @@ It shows every unique entry structure found in the file so we can
 see exactly where tool calls are stored.
 """
 
-import json, sys, collections
+import collections
+import json
+import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-lines = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 print(f"File: {path.name}  ({len(lines)} lines)\n")
 

@@ -5,10 +5,11 @@ Verifies the truncation changed from [:3000] to [:8000].
 Tests llm_judge_score() function in src/evaluator.py.
 """
 
-from unittest.mock import MagicMock, patch
 import json
-import pytest
 import sys
+from unittest.mock import MagicMock
+
+import pytest
 
 # Sample episode dict for testing
 SAMPLE_EPISODE = {
@@ -64,8 +65,9 @@ class TestJudgeSkillTruncation:
 
     def test_candidate_skill_full_text_passed_5000(self):
         """Test: candidate_skill < 8000 chars — full text passed."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -98,8 +100,9 @@ class TestJudgeSkillTruncation:
 
     def test_candidate_skill_exactly_8000_chars(self):
         """Test: candidate_skill exactly 8000 chars — full text passed."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -123,8 +126,9 @@ class TestJudgeSkillTruncation:
 
     def test_candidate_skill_truncated_from_12000_to_8000(self):
         """Test: candidate_skill > 8000 chars — truncated to 8000."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -149,8 +153,9 @@ class TestJudgeSkillTruncation:
 
     def test_candidate_skill_very_long_50000_chars(self):
         """Test: candidate_skill very long (50000 chars) — truncated to 8000."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -174,8 +179,9 @@ class TestJudgeSkillTruncation:
 
     def test_episode_context_truncated_at_2000(self):
         """Test: episode context (asi) truncation preserved at 2000."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -184,7 +190,7 @@ class TestJudgeSkillTruncation:
         from src.parse_session import episode_to_asi
 
         # Verify the expected ASI from episode
-        asi_raw = episode_to_asi(SAMPLE_EPISODE)
+        episode_to_asi(SAMPLE_EPISODE)
 
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
@@ -206,8 +212,9 @@ class TestJudgeSkillTruncation:
 
     def test_score_output_format(self):
         """Test: score output format — parsed correctly."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -235,8 +242,9 @@ class TestJudgeSkillTruncation:
 
     def test_invalid_json_from_judge_handled(self):
         """Test: invalid JSON from judge handled gracefully."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -256,8 +264,9 @@ class TestJudgeSkillTruncation:
 
     def test_judge_lm_parameter_passed_through(self):
         """Test: judge_lm parameter passed to litellm as model."""
-        from src import evaluator as ev
         import importlib
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
@@ -280,9 +289,10 @@ class TestJudgeSkillTruncation:
 
     def test_function_signature_unchanged(self):
         """Test: no change to function signature."""
-        import inspect
-        from src import evaluator as ev
         import importlib
+        import inspect
+
+        from src import evaluator as ev
 
         importlib.reload(ev)
         from src.evaluator import llm_judge_score

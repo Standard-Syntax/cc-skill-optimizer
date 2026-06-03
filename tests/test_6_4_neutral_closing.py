@@ -23,10 +23,9 @@ from parse_session import parse_session
 
 def _write_jsonl(entries: list[dict]) -> Path:
     """Helper: write entries to a temp JSONL file and return its path."""
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
-    for entry in entries:
-        tmp.write(json.dumps(entry) + "\n")
-    tmp.close()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
+        for entry in entries:
+            tmp.write(json.dumps(entry) + "\n")
     return Path(tmp.name)
 
 
@@ -204,8 +203,6 @@ class TestNeutralClosingFalseWithErrors:
         try:
             ep = parse_session(path)
             # Even with is_error=True, outcome may stay unknown if not paired properly
-            # Let's verify the error_message gets recorded at minimum
-            has_errors = len(ep["error_messages"]) > 0
             # Verify the field is in the episode
             assert "neutral_closing" in ep
             # neutral_closing should be False when outcome is not "unknown" with files written

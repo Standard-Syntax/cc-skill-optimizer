@@ -12,9 +12,8 @@ Coverage:
 """
 
 import argparse
-import sys
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -68,10 +67,7 @@ def compute_effective_max_evals(args_max_evals: int | None, phase: int) -> int:
     This mirrors lines ~1347-1356.
     """
     # Phase-based GEPA configuration
-    if phase == 1:
-        _gepa_default_max_evals = 100
-    else:  # phase 2
-        _gepa_default_max_evals = 60
+    _gepa_default_max_evals = 100 if phase == 1 else 60
 
     # Honor user --max-evals override; fall back to phase default only if user did not pass --max-evals
     effective_max_evals = args_max_evals if args_max_evals is not None else _gepa_default_max_evals
@@ -126,47 +122,43 @@ def test_max_evals_override_passes_through_to_run_gepa_optimize_anything():
 
     with mock.patch.object(
         opt_module, "run_gepa_optimize_anything", mock_run_gepa_optimize_anything
-    ):
-        with mock.patch.object(opt_module, "run_gepa_synthetic", mock_run_gepa_synthetic):
-            # Build args manually to simulate what main() does
-            ap = argparse.ArgumentParser()
-            ap.add_argument("--target", default="skill")
-            ap.add_argument("--phase", type=int, choices=[1, 2], default=1)
-            ap.add_argument("--max-evals", type=int, default=None)
+    ), mock.patch.object(opt_module, "run_gepa_synthetic", mock_run_gepa_synthetic):
+        # Build args manually to simulate what main() does
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--target", default="skill")
+        ap.add_argument("--phase", type=int, choices=[1, 2], default=1)
+        ap.add_argument("--max-evals", type=int, default=None)
 
-            # Simulate user passing --max-evals 25 and --phase 1
-            test_args = ap.parse_args(["--max-evals", "25", "--phase", "1"])
+        # Simulate user passing --max-evals 25 and --phase 1
+        test_args = ap.parse_args(["--max-evals", "25", "--phase", "1"])
 
-            # Compute effective_max_evals (mirrors optimize.py logic)
-            if test_args.phase == 1:
-                _gepa_default_max_evals = 100
-            else:
-                _gepa_default_max_evals = 60
+        # Compute effective_max_evals (mirrors optimize.py logic)
+        _gepa_default_max_evals = 100 if test_args.phase == 1 else 60
 
-            effective = (
-                test_args.max_evals if test_args.max_evals is not None else _gepa_default_max_evals
-            )
+        effective = (
+            test_args.max_evals if test_args.max_evals is not None else _gepa_default_max_evals
+        )
 
-            # Now simulate what happens when we call run_gepa_optimize_anything
-            # (mirrors the call site at line ~1511)
-            mock_run_gepa_optimize_anything(
-                seed_candidate="test",
-                train_set=[],
-                val_set=[],
-                objective=lambda x: (0, {}),
-                background={},
-                max_metric_calls=test_args.max_evals,  # Original args.max_evals
-                task_lm="test",
-                reflection_lm="test",
-                output_dir=Path("/tmp/test"),
-                frontier_type="instance",
-                max_evals_override=effective,  # Should be 25 from our override
-            )
+        # Now simulate what happens when we call run_gepa_optimize_anything
+        # (mirrors the call site at line ~1511)
+        mock_run_gepa_optimize_anything(
+            seed_candidate="test",
+            train_set=[],
+            val_set=[],
+            objective=lambda x: (0, {}),
+            background={},
+            max_metric_calls=test_args.max_evals,  # Original args.max_evals
+            task_lm="test",
+            reflection_lm="test",
+            output_dir=Path("/tmp/test"),
+            frontier_type="instance",
+            max_evals_override=effective,  # Should be 25 from our override
+        )
 
-            # Verify the effective value was passed
-            assert captured_kwargs["max_evals_override"] == 25, (
-                f"Expected max_evals_override=25, got {captured_kwargs['max_evals_override']}"
-            )
+        # Verify the effective value was passed
+        assert captured_kwargs["max_evals_override"] == 25, (
+            f"Expected max_evals_override=25, got {captured_kwargs['max_evals_override']}"
+        )
 
 
 # Additional coverage: verify the difference between args.max_evals and effective_max_evals

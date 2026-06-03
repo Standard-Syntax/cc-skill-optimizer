@@ -6,13 +6,14 @@ when two headings normalize to the same key.
 """
 
 import inspect
+
 import pytest
+
 from section_parser import (
     _make_unique_key,
-    _normalize_key,
-    parse_sections,
-    merge_sections,
     build_section_tree,
+    merge_sections,
+    parse_sections,
 )
 
 
@@ -179,7 +180,7 @@ Second build section.
         assert len(section_keys2) == 2
 
         # Second merge
-        merged2 = merge_sections(sections2, max_depth=2)
+        merge_sections(sections2, max_depth=2)
 
         # Should have same number of sections
         assert len(section_keys2) == len(section_keys1)
@@ -221,7 +222,7 @@ Second section.
         # Create 10 headings that all normalize to the same key, with actual content for each
         lines = []
         for i in range(10):
-            lines.append(f"## Build")
+            lines.append("## Build")
             lines.append(f"Some content for section {i}.")
             lines.append("")  # blank line between sections
         text = "\n".join(lines)

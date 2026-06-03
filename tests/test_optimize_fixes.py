@@ -5,8 +5,6 @@ Verify 3 correctness bug fixes in optimize.py:
 3. run_dspy_gepa logs WARNING when DSPy extraction fails
 """
 
-import json
-import logging
 import sys
 import unittest
 from pathlib import Path
@@ -173,6 +171,7 @@ class TestRunDspyGepaWarningOnExtractionFailure(unittest.TestCase):
     def test_warning_code_exists_in_source(self):
         """Verify the warning log code exists in run_dspy_gepa source."""
         import inspect
+
         from optimize import run_dspy_gepa
 
         source = inspect.getsource(run_dspy_gepa)

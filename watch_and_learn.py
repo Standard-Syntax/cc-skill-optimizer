@@ -25,6 +25,7 @@ Run in background:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import sys
 import time
 from pathlib import Path
@@ -179,7 +180,8 @@ def _run_optimization(
     from evaluator import make_replay_evaluator
 
     try:
-        import gepa.optimize_anything as oa
+        if importlib.util.find_spec("gepa.optimize_anything") is None:
+            raise ImportError("gepa.optimize_anything not available")
         from gepa.optimize_anything import (
             EngineConfig,
             GEPAConfig,

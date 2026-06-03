@@ -34,11 +34,10 @@ def scan_for_jsonl_files(
                 if (project_dir / "subagents").exists()
                 else []
             ):
-                if str(jsonl) not in known_paths:
+                if str(jsonl) not in known_paths and time.time() - jsonl.stat().st_mtime > 10:
                     # Only process sessions that haven't been modified in >10s
                     # (give Claude Code time to finish writing)
-                    if time.time() - jsonl.stat().st_mtime > 10:
-                        new_files.append(jsonl)
+                    new_files.append(jsonl)
     return new_files
 
 

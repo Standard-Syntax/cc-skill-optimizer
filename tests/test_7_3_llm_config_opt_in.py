@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-
 BASE_DIR = Path(__file__).parent.parent
 
 
@@ -210,10 +209,9 @@ class TestLintAndFormat:
             text=True,
         )
         # Only care about real errors, not warnings
-        if result.returncode != 0 and "error" in result.stdout.lower():
+        if result.returncode != 0 and "error" in result.stdout.lower() and "UP024" not in result.stdout:
             # Check if it's just the OSError alias preference
-            if "UP024" not in result.stdout:
-                pytest.fail(f"Lint errors: {result.stdout}")
+            pytest.fail(f"Lint errors: {result.stdout}")
 
     def test_llm_config_py_format_clean(self):
         """Test 14b: src/llm_config.py format is clean."""

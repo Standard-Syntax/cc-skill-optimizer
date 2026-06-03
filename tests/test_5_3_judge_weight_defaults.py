@@ -13,7 +13,6 @@ from __future__ import annotations
 import inspect
 import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -223,7 +222,7 @@ class TestNoHiddenOldDefaults:
         from src import evaluator
 
         source_file = evaluator.__file__
-        with open(source_file, "r") as f:
+        with open(source_file) as f:
             content = f.read()
 
         # Should NOT have "judge_weight: float = 0.4"
@@ -234,7 +233,7 @@ class TestNoHiddenOldDefaults:
         from src import evaluator
 
         source_file = evaluator.__file__
-        with open(source_file, "r") as f:
+        with open(source_file) as f:
             content = f.read()
 
         # Should NOT have "judge_weight: float = 0.7"
@@ -245,7 +244,7 @@ class TestNoHiddenOldDefaults:
         from src import synthetic_evaluator
 
         source_file = synthetic_evaluator.__file__
-        with open(source_file, "r") as f:
+        with open(source_file) as f:
             content = f.read()
 
         # Should NOT have "judge_weight: float = 0.4"
@@ -258,7 +257,7 @@ class TestNoHiddenOldDefaults:
         from src import synthetic_evaluator
 
         source_file = synthetic_evaluator.__file__
-        with open(source_file, "r") as f:
+        with open(source_file) as f:
             content = f.read()
 
         # Should NOT have "judge_weight: float = 0.7"

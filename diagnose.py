@@ -10,7 +10,10 @@ finds and why episodes get dropped.
 """
 
 from __future__ import annotations
-import argparse, json, sys
+
+import argparse
+import json
+import sys
 from collections import Counter
 from pathlib import Path
 

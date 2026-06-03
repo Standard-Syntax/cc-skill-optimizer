@@ -7,11 +7,12 @@ during parse → merge → parse → merge cycles.
 Validates the idempotency property: multiple parse→merge cycles produce identical output.
 """
 
-import pytest
 import sys
 
+import pytest
+
 sys.path.insert(0, "src")
-from section_parser import parse_sections, merge_sections
+from section_parser import merge_sections, parse_sections
 
 
 class TestMergeIdempotency:
@@ -144,7 +145,7 @@ API endpoints.
         first_merge = merge_sections(sections)
 
         # Do 3 parse → merge cycles
-        for i in range(3):
+        for _i in range(3):
             sections = parse_sections(first_merge, max_depth=2)
             first_merge = merge_sections(sections)
 

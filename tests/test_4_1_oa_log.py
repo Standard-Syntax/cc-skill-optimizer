@@ -18,10 +18,10 @@ import pytest
 
 # Ensure src/ is on the path
 _SRC = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(_SRC))
+sys.path.insert(0, str(_SRC))  # noqa: E402 — test path setup, must precede module import
 
-# Import after path setup
-import synthetic_evaluator
+# Intentional: import after sys.path.insert for path setup
+import synthetic_evaluator  # noqa: E402
 
 
 # Helper class to capture oa.log() calls

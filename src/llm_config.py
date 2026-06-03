@@ -184,7 +184,7 @@ def configure() -> None:
     """
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        raise EnvironmentError(
+        raise OSError(
             "ANTHROPIC_API_KEY is not set.\n"
             "Export your MiniMax API key: export ANTHROPIC_API_KEY=..."
         )

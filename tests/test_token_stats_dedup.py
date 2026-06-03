@@ -13,8 +13,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
-
 # Ensure src/ is on path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -23,10 +21,9 @@ from parse_session import parse_session
 
 def _write_jsonl(entries: list[dict]) -> Path:
     """Write entries to a temp JSONL file and return the path."""
-    fp = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False, mode="w")
-    for e in entries:
-        fp.write(json.dumps(e) + "\n")
-    fp.close()
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False, mode="w") as fp:
+        for e in entries:
+            fp.write(json.dumps(e) + "\n")
     return Path(fp.name)
 
 
@@ -245,8 +242,8 @@ def test_assistant_without_message_id_does_not_crash():
 
 def test_empty_session():
     """Empty JSONL file → returns empty episode with zero token_stats."""
-    fp = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False, mode="w")
-    fp.close()
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False, mode="w") as fp:
+        pass  # Create empty file
     fp_path = Path(fp.name)
     try:
         ep = parse_session(fp_path)

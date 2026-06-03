@@ -32,6 +32,7 @@ Output schema (list of dicts):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from collections.abc import Iterator
@@ -102,10 +103,8 @@ def read_jsonl(path: Path) -> list[dict]:
             raw = raw.strip()
             if not raw:
                 continue
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 lines.append(json.loads(raw))
-            except json.JSONDecodeError:
-                pass
     return lines
 
 
@@ -335,9 +334,8 @@ def parse_session(path: Path) -> dict:
                     cmd = tool_input.get("command", "")
                     if cmd:
                         bash_commands.append(cmd)
-                        if result_is_error or "error" in result_text.lower()[:80]:
-                            if outcome == "unknown":
-                                outcome = "error"
+                        if (result_is_error or "error" in result_text.lower()[:80]) and outcome == "unknown":
+                            outcome = "error"
 
                 elif tool_name in ("Read", "read"):
                     fp = tool_input.get("file_path", "")
@@ -581,11 +579,15 @@ if __name__ == "__main__":
         args.min_tool_calls,
     )
 
-    out = sys.stdout if args.output == "-" else open(args.output, "w")
-    for ep in corpus:
-        # Strip heavy fields for CLI preview
-        preview = {k: v for k, v in ep.items() if k not in ("tool_calls", "assistant_text")}
-        out.write(_json.dumps(preview) + "\n")
-    if args.output != "-":
-        out.close()
+    if args.output == "-":
+        for ep in corpus:
+            # Strip heavy fields for CLI preview
+            preview = {k: v for k, v in ep.items() if k not in ("tool_calls", "assistant_text")}
+            sys.stdout.write(_json.dumps(preview) + "\n")
+    else:
+        with open(args.output, "w") as out:
+            for ep in corpus:
+                # Strip heavy fields for CLI preview
+                preview = {k: v for k, v in ep.items() if k not in ("tool_calls", "assistant_text")}
+                out.write(_json.dumps(preview) + "\n")
         print(f"Wrote {len(corpus)} episodes to {args.output}")

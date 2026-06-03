@@ -456,7 +456,7 @@ def test_data_structure_types(tmp_projects_dir: Path) -> None:
     preexisting_paths: set[str] = set()
 
     # First poll
-    new_files = scan_cycle(tmp_projects_dir, None, known_files, stable_files, preexisting_paths)
+    scan_cycle(tmp_projects_dir, None, known_files, stable_files, preexisting_paths)
 
     # Verified by initialization
     assert isinstance(known_files, dict)

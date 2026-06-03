@@ -8,7 +8,6 @@ Verify 5 remaining correctness fixes in optimize.py:
 """
 
 import inspect
-import logging
 import sys
 import unittest
 from pathlib import Path
@@ -52,7 +51,7 @@ class TestIssue7ModuleLevelConstants(unittest.TestCase):
     def test_import_directly_from_module(self):
         """Should be able to import these constants directly."""
         # This tests they are truly at module level, not nested in a function
-        from optimize import OBJECTIVE_BY_TARGET, BACKGROUND_BY_TARGET
+        from optimize import BACKGROUND_BY_TARGET, OBJECTIVE_BY_TARGET
 
         self.assertTrue(len(OBJECTIVE_BY_TARGET["skill"]) > 0)
         self.assertTrue(len(BACKGROUND_BY_TARGET["skill"]) > 0)
@@ -210,7 +209,7 @@ class TestIssue17FStringPrefixFixed(unittest.TestCase):
         # Check line 518 specifically - it's a regular string replace, not an f-string
         lines = source.split("\n")
         for i, line in enumerate(lines):
-            line_num = i + 1
+            i + 1
             stripped = line.strip()
 
             # Skip comments
@@ -282,7 +281,7 @@ class TestIssue18SeedByTargetHasAllKeys(unittest.TestCase):
 
     def test_seed_by_target_references_correct_seed_variables(self):
         """SEED_BY_TARGET values should reference actual SEED_* variables."""
-        from optimize import SEED_BY_TARGET, SEED_SKILL_MD, SEED_CLAUDE_MD, SEED_AGENTS_MD
+        from optimize import SEED_AGENTS_MD, SEED_BY_TARGET, SEED_CLAUDE_MD, SEED_SKILL_MD
 
         # skill -> SEED_SKILL_MD
         self.assertEqual(SEED_BY_TARGET["skill"], SEED_SKILL_MD)

@@ -1446,7 +1446,7 @@ def main() -> None:
 
     try:
         configure()
-    except EnvironmentError as exc:
+    except OSError as exc:
         print(f"[optimize] ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
     ap = argparse.ArgumentParser(
