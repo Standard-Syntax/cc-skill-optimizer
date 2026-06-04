@@ -435,15 +435,20 @@ class TestSharedDspyModule:
         assert "dspy.Prediction(score=score, feedback=feedback)" in src_native
         print("OK: both mipro and native-gepa metrics return dspy.Prediction")
 
-    def test_run_dspy_gepa_docstring_mentions_signature_instructions(self):
-        """After Phase 17.2, run_dspy_gepa's docstring has a NOTE paragraph
-        explaining the signature.instructions vs SKILL.md distinction."""
+    def test_run_dspy_gepa_docstring_mentions_signature_instructions_and_output(self):
+        """After Phase 20.2, run_dspy_gepa docstring should mention signature.instructions
+        (the optimizable field) and best_candidate_dspy.md (the output file)."""
         import optimize
         doc = optimize.run_dspy_gepa.__doc__ or ""
         assert "signature.instructions" in doc, (
-            "run_dspy_gepa docstring should mention 'signature.instructions'"
+            "run_dspy_gepa docstring should mention 'signature.instructions' "
+            "as the optimizable field"
         )
-        assert "SKILL.md" in doc, (
-            "run_dspy_gepa docstring should mention 'SKILL.md' (the output differs from the SKILL.md path)"
+        assert "best_candidate_dspy.md" in doc, (
+            "run_dspy_gepa docstring should mention 'best_candidate_dspy.md' "
+            "as the output file (it IS the SKILL.md content after Phase 20.1)"
         )
-        print("OK: run_dspy_gepa docstring has the NOTE paragraph")
+        assert "differs from GEPA" not in doc, (
+            "run_dspy_gepa docstring should NOT contain the stale 'differs from GEPA' caveat"
+        )
+        print("OK: run_dspy_gepa docstring mentions signature.instructions and best_candidate_dspy.md")

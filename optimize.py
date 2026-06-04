@@ -1129,13 +1129,11 @@ def run_dspy_gepa(
 ) -> str:
     """
     Use dspy.MIPROv2 to optimize the skill as a DSPy Predict signature.
-    Returns the optimized skill content as a string.
-
-    NOTE — DSPy path output format:
-      This DSPy path extracts DSPy's internal `signature.instructions` field
-      after optimization, NOT a SKILL.md file. So the output format differs
-      from GEPA's `optimize_anything` path which writes `best_candidate.md`.
-      The file written by this function is `best_candidate_dspy.md`.
+    The seed skill content is set as the predictor's `signature.instructions`
+    (via `SkillGuidedTask.with_instructions(seed_candidate)` in
+    `src.dspy_shared.SkillProgram`), so MIPROv2 rewrites the SKILL content
+    during optimization. Returns the optimized skill content as a string.
+    The file written by this function is `best_candidate_dspy.md`.
     """
     import dspy
     from dspy import MIPROv2
@@ -1252,8 +1250,12 @@ def run_dspy_native_gepa(
 ) -> str:
     """
     Use dspy.GEPA (the native multi-objective optimizer introduced in dspy 3.0)
-    to optimize the skill as a DSPy Predict signature. Returns the optimized skill
-    content as a string.
+    to optimize the skill as a DSPy Predict signature. The seed skill content
+    is set as the predictor's `signature.instructions` (via
+    `SkillGuidedTask.with_instructions(seed_candidate)` in
+    `src.dspy_shared.SkillProgram`), so dspy.GEPA rewrites the SKILL content
+    during optimization. Returns the optimized skill content as a string.
+    The file written by this function is `best_candidate_dspy.md`.
     """
     import dspy
     from dspy import GEPA

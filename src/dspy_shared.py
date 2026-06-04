@@ -6,11 +6,9 @@ inline (and had begun to diverge) in both runner functions. After Phase 17,
 both run_dspy_gepa and run_dspy_native_gepa in optimize.py import from
 this module instead of redefining the helpers locally.
 
-NOTE — DSPy path output format:
-  This DSPy path extracts DSPy's internal `signature.instructions` field
-  after optimization, NOT a SKILL.md file. So the output format differs
-  from GEPA's `optimize_anything` path which writes `best_candidate.md`.
-  See improve docs / cc-skill-optimizer-improvements.md for the full note.
+The skill content (SKILL.md) lives in the predictor's
+  `signature.instructions` field and is what MIPROv2/dspy.GEPA rewrite
+  during optimization.
 """
 
 from __future__ import annotations
@@ -19,17 +17,13 @@ import dspy
 
 
 class SkillGuidedTask(dspy.Signature):
-    """Apply repository skills to complete a software engineering task.
+    """Apply a repository skill to a software engineering task.
 
-    The skill_instructions field carries the SKILL.md content as
-    runtime guidance; task_prompt is the user's actual request; and
-    error_context surfaces any prior errors from the session so the
-    completion can recover from them.
+    The skill content is provided as the signature's instructions (system
+    prompt); task_prompt is the user's request; and error_context surfaces
+    prior errors from the session so the completion can recover from them.
     """
 
-    skill_instructions: str = dspy.InputField(
-        desc="SKILL.md content guiding the agent"
-    )
     task_prompt: str = dspy.InputField(
         desc="The software engineering task to complete"
     )
@@ -43,18 +37,18 @@ class SkillGuidedTask(dspy.Signature):
 
 
 class SkillProgram(dspy.Module):
-    """Single-predictor DSPy module that applies a fixed skill_content to tasks.
+    """Single-predictor DSPy module that applies a skill to tasks.
 
-    The skill_content is set at construction (and used as the
-    skill_instructions for every forward call). The forward() method
-    packages task_prompt + error_context into a SkillGuidedTask call
-    and returns the resulting dspy.Prediction.
+    The skill_content is set as the predictor's instructions (system prompt)
+    and is what MIPROv2/dspy.GEPA rewrite during optimization.
+    The forward() method packages task_prompt + error_context into a
+    SkillGuidedTask call and returns the resulting dspy.Prediction.
     """
 
     def __init__(self, skill_content: str) -> None:
         super().__init__()
         self.skill_content = skill_content
-        self.predictor = dspy.Predict(SkillGuidedTask)
+        self.predictor = dspy.Predict(SkillGuidedTask.with_instructions(skill_content))
 
     def forward(
         self,
@@ -62,7 +56,6 @@ class SkillProgram(dspy.Module):
         error_context: str = "",
     ) -> dspy.Prediction:
         return self.predictor(
-            skill_instructions=self.skill_content,
             task_prompt=task_prompt,
             error_context=error_context,
         )
