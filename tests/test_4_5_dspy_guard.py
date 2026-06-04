@@ -520,3 +520,27 @@ class TestDspyMockSurfacePhase14:
         assert not re.search(r"dspy\.configure\s*\(", src), (
             "make_dspy_synthetic_pipeline must not call legacy dspy.configure(lm=...)"
         )
+
+    def test_mock_dspy_modules_supports_shared_dspy_shared_module(self):
+        """After Phase 17.2, both run_dspy_gepa and run_dspy_native_gepa import
+        SkillGuidedTask, SkillProgram, ep_to_example, and _ideal_completion_from_episode
+        from src.dspy_shared. The mock_dspy_modules() factory must still mock
+        the underlying dspy primitives (dspy.Signature, dspy.Module, dspy.Predict,
+        dspy.Example, dspy.Prediction) used by the shared module."""
+        with mock_dspy_modules() as mocks:
+            # All dspy primitives used by src/dspy_shared.py must be mockable
+            for name in ("Signature", "Module", "Predict", "Example", "Prediction", "InputField", "OutputField"):
+                assert hasattr(mocks["dspy"], name), (
+                    f"mock_dspy.{name} should be set so SkillGuidedTask / SkillProgram "
+                    f"can use it. Missing: {name}"
+                )
+            # SkillGuidedTask and SkillProgram are NOT mocked individually — they
+            # are imported from src.dspy_shared, which uses the mocked dspy primitives.
+            # The test below confirms src.dspy_shared can be imported (without
+            # breaking) and the underlying dspy primitives are correctly mocked.
+            import dspy_shared  # noqa: F401 — this is src.dspy_shared
+            assert dspy_shared.SkillGuidedTask is not None
+            assert dspy_shared.SkillProgram is not None
+            assert dspy_shared.ep_to_example is not None
+            assert dspy_shared._ideal_completion_from_episode is not None
+            print("OK: mock_dspy_modules() supports src.dspy_shared")

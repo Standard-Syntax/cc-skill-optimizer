@@ -35,6 +35,39 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from parse_session import DEFAULT_CLAUDE_DIR, build_corpus, parse_session
 
 
+def _get_warm_seed(output_dir: Path, target: str, original_seed: str) -> str:
+    """Return the previous run's best_candidate.md as the warm seed, or
+    the original_seed if no prior output exists.
+
+    The watcher writes the optimized SKILL.md to <output_dir>/<target>/best_candidate.md
+    after each successful optimization. The next run reads this file (if it exists)
+    as the seed, so GEPA refines from the prior best instead of rediscovering.
+
+    Args:
+        output_dir: Root output directory (e.g., Path("outputs")).
+        target: Target name (e.g., "skill" or "banking" — derived from --skill-file stem
+            or --project-filter).
+        original_seed: The seed to fall back to when no prior best exists.
+
+    Returns:
+        The prior best_candidate.md content (if it exists), otherwise original_seed.
+    """
+    best_path = output_dir / target / "best_candidate.md"
+    if best_path.exists():
+        try:
+            content = best_path.read_text(encoding="utf-8")
+            print(f"[watch] Warm-restarting from previous best ({len(content)} chars)")
+            return content
+        except (OSError, UnicodeDecodeError) as exc:
+            print(
+                f"[watch] WARN: could not read {best_path} ({exc}); "
+                f"falling back to original seed",
+                file=sys.stderr,
+            )
+            return original_seed
+    return original_seed
+
+
 def watch_and_learn(
     skill_file: Path,
     claude_dir: Path,
@@ -43,7 +76,17 @@ def watch_and_learn(
     reflection_lm: str,
     max_evals_per_run: int,
     poll_interval: float,
+    output_dir: Path | None = None,
+    target: str | None = None,
 ) -> None:
+    # Output directory for warm-restart artifacts. Default: outputs/<skill_file.stem>
+    if output_dir is None:
+        output_dir = Path("outputs")
+    if target is None:
+        # Derive target from skill_file stem (e.g., .claude/skills/banking/SKILL.md → "SKILL")
+        # Fall back to project_filter if skill_file has no recognizable stem.
+        target = skill_file.stem or project_filter or "default"
+    print(f"[watch] Warm-restart output: {output_dir}/{target}/best_candidate.md")
     print(f"[watch] Watching {claude_dir}/projects/ for new sessions")
     print(f"[watch] Skill file: {skill_file}")
     print(f"[watch] Will re-optimize every {optimize_every} new episodes\n")
@@ -149,12 +192,25 @@ def watch_and_learn(
                     print(
                         f"\n[watch] Milestone reached ({episodes_since_last_opt} new episodes). Re-optimizing..."
                     )
+                    # Warm-restart: use prior best_candidate.md as the seed if it
+                    # exists, otherwise fall back to current_skill (the current
+                    # skill_file content).
+                    # Note: current_skill is str for single-component targets (the only
+                    # warm-restart case); multi-component targets skip warm restart.
+                    assert isinstance(current_skill, str), "warm restart only supports str seed"
+                    seed = _get_warm_seed(
+                        output_dir=output_dir,
+                        target=target,
+                        original_seed=current_skill,
+                    )
                     current_skill = _run_optimization(
                         corpus,
-                        current_skill,
+                        seed,
                         skill_file,
                         reflection_lm,
                         max_evals_per_run,
+                        output_dir,
+                        target,
                         max_backups=5,
                     )
                     episodes_since_last_opt = 0
@@ -173,6 +229,8 @@ def _run_optimization(
     skill_file: Path,
     reflection_lm: str,
     max_evals: int,
+    output_dir: Path,
+    target: str,
     max_backups: int = 5,
 ) -> str | dict[str, str]:
     import random
@@ -243,6 +301,20 @@ def _run_optimization(
         skill_file.write_text(best, encoding="utf-8")
     best_score = result.val_aggregate_scores[result.best_idx]
     print(f"[watch] Backed up to {backup.name}, wrote new skill ({best_score:.3f})")
+    # Also write best_candidate.md to <output_dir>/<target>/ so the next watch
+    # cycle can warm-restart from this run's best. Skip if the optimizer returned
+    # a dict (multi-component target) — that path doesn't write best_candidate.md.
+    if isinstance(best, str):
+        best_path = output_dir / target / "best_candidate.md"
+        best_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            best_path.write_text(best, encoding="utf-8")
+        except OSError as exc:
+            print(
+                f"[watch] WARN: could not write {best_path} ({exc}); "
+                f"warm-restart will fall back to disk-read of skill_file next run",
+                file=sys.stderr,
+            )
     return best
 
 
@@ -264,6 +336,17 @@ if __name__ == "__main__":
     ap.add_argument(
         "--poll-interval", type=float, default=15.0, help="Seconds between filesystem polls"
     )
+    ap.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Output directory for warm-restart artifacts (default: ./outputs)",
+    )
+    ap.add_argument(
+        "--target",
+        default=None,
+        help="Target name for warm-restart artifacts (default: skill_file.stem or project_filter)",
+    )
     args = ap.parse_args()
 
     watch_and_learn(
@@ -274,4 +357,6 @@ if __name__ == "__main__":
         reflection_lm=args.reflection_lm,
         max_evals_per_run=args.max_evals_per_run,
         poll_interval=args.poll_interval,
+        output_dir=args.output_dir,
+        target=args.target,
     )

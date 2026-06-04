@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Phases 15-18: 10 improvements from cc-skill-optimizer-improvements.md** (2026-06-04)
+  - **15.1**: Wire `neutral_closing` into `_outcome_score()` — unknown-outcome episodes with files written and no errors now score 0.7 instead of 0.5 (was a silent accuracy regression).
+  - **15.2**: Change `split_corpus()` default to 80/20/0 — matches the GEPA FAQ recommendation; legacy 70/20/10 wasted 10% of every corpus on a test slice that was never used. New `--test-frac 0.0` flag preserves backward compatibility.
+  - **16.1**: Raise ASI cap from 2000 to 4000 chars + lower candidate cap from 8000 to 6000 — reflection LM benefits from fuller tool_calls and complete test output (gskill/optimize_anything paper).
+  - **16.2**: Reorder `episode_to_asi()` sections so highest-signal content (Outcome → Errors → Task → Final assistant message) appears first. Combines Files read + Files written into a single "Files touched" section.
+  - **16.3**: Score all components in `make_multi_evaluator` and `make_nested_evaluator` — was scoring only the primary component. Now scores the full concatenated candidate AND populates `side_info["scores"]` with per-component scores for multi-objective Pareto via `frontier_type="hybrid"`. Wraps combined-call `base_evaluator` in try/except for graceful 0.0 fallback.
+  - **17.1**: Create `src/dspy_shared.py` with `SkillGuidedTask`, `SkillProgram`, `ep_to_example`, `_ideal_completion_from_episode` extracted from inline duplicates in both `run_dspy_gepa` and `run_dspy_native_gepa`. Module docstring notes the DSPy path extracts `signature.instructions`, not a SKILL.md.
+  - **17.2**: Refactor `optimize.py` to import the shared DSPy helpers; mipro metric now returns `dspy.Prediction(score, feedback)` (was `float`) for consistency with dspy 3.x's `GEPAFeedbackMetric` contract.
+  - **17.3**: Test mock surface update — `tests/test_4_5_dspy_guard.py` and `tests/test_11_dspy_native_gepa.py` updated to verify the refactor.
+  - **18.1**: Add `make_length_constrained_proposer(max_chars=2000)` factory and `--max-skill-chars` CLI flag. The proposer mutates `reflective_dataset` in-place to inject a length constraint into the reflection prompt. Decagon ablation study found 1,500-char constraint achieved 4× compression with 0.8% performance loss.
+  - **18.2**: Add warm-restart seeding to `watch_and_learn.py` via `_get_warm_seed(output_dir, target, original_seed)` helper — uses the prior run's `best_candidate.md` as the next seed. New `--output-dir` and `--target` CLI flags.
+  - **18.3**: Add `TASK_GEN_MAX_TOKENS = 8192` constant in `src/llm_config.py` and use it in `src/synthetic_evaluator.py:generate_tasks_for_domain`. The legacy `EVAL_MAX_TOKENS * 8` (4096) was too tight for 20+ tasks; truncation caused silent fallback to the built-in library. New truncation warning fires when fewer tasks are returned than requested.
+  - **18.4**: Enrich `_JUDGE_SYSTEM` in `src/evaluator.py` with a SKILL.md format-rubric sentence — well-formed skills are under 2000 tokens, use markdown headers and numbered lists, contain repo-specific commands rather than generic advice. Aligns the LLM judge with the structural scorer.
+  - **18.5**: Tune `structural_score()` length bounds from [800, 2500] → [600, 1800] (Decagon 1,500-char optimum), strengthen bloat penalty 0.04 → 0.02, switch specificity scoring from raw count `hits * 0.015` to density-based `(hits / word_count * 100) * 0.05` (capped at 0.20).
+  - 141 new tests across 11 new test files (and 1 modified test file); 0 regressions across all 4 phases' regression suites; Phase 14 invariant (no `dspy.configure`) intact.
+
+### Changed
+- `split_corpus()` function gained a new `test_frac` parameter (default 0.0); old 4-arg positional callers (without test_frac) will fail with TypeError — the only such caller was already updated in `main()`.
+- MIPROv2 metric return type changed from `float` to `dspy.Prediction(score, feedback)` for dspy 3.x `GEPAFeedbackMetric` contract compatibility.
+
+### Migration
+- No breaking changes; all new CLI flags have default values matching prior behavior.
+
 - **Phase 12: Test surface + Final QA** (2026-06-03)
   - New `tests/test_11_dspy_native_gepa.py` with 14 tests covering:
     - `--dspy-backend native-gepa` CLI flag recognition

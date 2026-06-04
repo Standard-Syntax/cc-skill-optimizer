@@ -366,3 +366,84 @@ class TestNativeGepaCLIIntegration:
         assert not re.search(r"dspy\.configure\s*\(", src), (
             "make_dspy_synthetic_pipeline must not call legacy dspy.configure(lm=...)"
         )
+
+
+# ============================================================================
+# Tests for Phase 17.3: verify the shared DSPy module refactor
+# ============================================================================
+
+
+class TestSharedDspyModule:
+    """Phase 17.3: verify that run_dspy_gepa and run_dspy_native_gepa both
+    import from src.dspy_shared (not inline duplicates), and that the mipro
+    metric returns dspy.Prediction (matching the native-gepa contract)."""
+
+    def test_dspy_shared_importable(self):
+        """The shared module is importable and exports the 4 expected names."""
+        from src.dspy_shared import (
+            SkillGuidedTask,
+            SkillProgram,
+            _ideal_completion_from_episode,
+            ep_to_example,
+        )
+        assert SkillGuidedTask is not None
+        assert SkillProgram is not None
+        assert ep_to_example is not None
+        assert _ideal_completion_from_episode is not None
+        print("OK: src.dspy_shared exports all 4 expected names")
+
+    def test_run_dspy_gepa_no_inline_defs(self):
+        """After Phase 17.2, run_dspy_gepa must NOT redefine SkillGuidedTask,
+        SkillProgram, ep_to_example, or _ideal_completion_from_episode inline."""
+        import optimize
+        src = inspect.getsource(optimize.run_dspy_gepa)
+        for symbol in ("class SkillGuidedTask", "class SkillProgram", "def ep_to_example", "def _ideal_completion_from_episode"):
+            assert symbol not in src, (
+                f"run_dspy_gepa still has inline {symbol} — should import from src.dspy_shared"
+            )
+        # It should USE the imported names (ep_to_example is called)
+        assert "ep_to_example(" in src, "run_dspy_gepa should call ep_to_example(ep) ..."
+        # It should NOT redefine SkillProgram inline (the new code uses SkillProgram(...))
+        assert "class SkillProgram" not in src
+        print("OK: run_dspy_gepa has no inline DSPy class/function defs")
+
+    def test_run_dspy_native_gepa_no_inline_defs(self):
+        """After Phase 17.2, run_dspy_native_gepa must NOT redefine the DSPy
+        helpers inline either."""
+        import optimize
+        src = inspect.getsource(optimize.run_dspy_native_gepa)
+        for symbol in ("class SkillGuidedTask", "class SkillProgram", "def ep_to_example", "def _ideal_completion_from_episode"):
+            assert symbol not in src, (
+                f"run_dspy_native_gepa still has inline {symbol} — should import from src.dspy_shared"
+            )
+        assert "ep_to_example(" in src, "run_dspy_native_gepa should call ep_to_example(ep) ..."
+        assert "class SkillProgram" not in src
+        print("OK: run_dspy_native_gepa has no inline DSPy class/function defs")
+
+    def test_mipro_metric_returns_dspy_prediction(self):
+        """After Phase 17.2, the mipro metric (in run_dspy_gepa) returns
+        dspy.Prediction(score, feedback) — same contract as the native-gepa metric.
+        The legacy 'return score' (float) is gone."""
+        import optimize
+        src = inspect.getsource(optimize.run_dspy_gepa)
+        # The new metric must return dspy.Prediction(score=score, feedback=feedback)
+        assert "dspy.Prediction(score=score, feedback=feedback)" in src, (
+            "mipro metric in run_dspy_gepa should return dspy.Prediction(score=score, feedback=feedback)"
+        )
+        # The native-gepa metric already does this (regression check)
+        src_native = inspect.getsource(optimize.run_dspy_native_gepa)
+        assert "dspy.Prediction(score=score, feedback=feedback)" in src_native
+        print("OK: both mipro and native-gepa metrics return dspy.Prediction")
+
+    def test_run_dspy_gepa_docstring_mentions_signature_instructions(self):
+        """After Phase 17.2, run_dspy_gepa's docstring has a NOTE paragraph
+        explaining the signature.instructions vs SKILL.md distinction."""
+        import optimize
+        doc = optimize.run_dspy_gepa.__doc__ or ""
+        assert "signature.instructions" in doc, (
+            "run_dspy_gepa docstring should mention 'signature.instructions'"
+        )
+        assert "SKILL.md" in doc, (
+            "run_dspy_gepa docstring should mention 'SKILL.md' (the output differs from the SKILL.md path)"
+        )
+        print("OK: run_dspy_gepa docstring has the NOTE paragraph")

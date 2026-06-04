@@ -514,48 +514,75 @@ def episode_to_asi(ep: dict) -> str:
     """
     Build Actionable Side Information from a parsed episode.
     This is what the GEPA reflection LM reads to diagnose failures.
+
+    Section order is optimized for truncation safety (after Phase 16.1 the
+    episode cap is 4000 chars; the LLM judge still slices with [:4000], so
+    content at the end is at risk of being cut). Highest-signal sections
+    come first to ensure they're always preserved.
+
+    Order (top → bottom):
+      1. Outcome           — single line, fastest failure-mode classifier
+      2. Errors            — concrete error messages, prevent recurrence
+      3. Task              — the actual user request being optimized for
+      4. Final assistant   — the most diagnostic single message
+      5. Duration          — session-length context
+      6. Bash commands     — what the agent actually ran
+      7. Files touched     — read + written, combined for brevity
+      8. Context compaction — verbose; only present when it happened
+      9. Token usage       — diagnostic for cost/context pressure
+     10. Tool sequence     — bulkier; safe to truncate to the last 30 tools
     """
     parts: list[str] = []
 
-    parts.append(f"## Task\n{ep['task_prompt'][:600]}")
-
+    # 1. Outcome — always present; fastest signal
     parts.append(f"## Outcome: {ep['outcome'].upper()}")
 
-    if ep["duration_s"] is not None:
-        parts.append(f"## Duration: {ep['duration_s']:.1f}s")
-
+    # 2. Errors — concrete, actionable, prevents same failure next iteration
     if ep["error_messages"]:
         parts.append("## Errors\n" + "\n".join(f"- {e[:300]}" for e in ep["error_messages"][:5]))
 
+    # 3. Task — the user request
+    parts.append(f"## Task\n{ep['task_prompt'][:600]}")
+
+    # 4. Final assistant message — most diagnostic single message
+    if ep["assistant_text"]:
+        last = ep["assistant_text"][-1][:800]
+        parts.append(f"## Final assistant message\n{last}")
+
+    # 5. Duration — one line, useful for efficiency tuning
+    if ep["duration_s"] is not None:
+        parts.append(f"## Duration: {ep['duration_s']:.1f}s")
+
+    # 6. Bash commands — what the agent ran
     if ep["bash_commands"]:
         parts.append(
             "## Bash commands executed\n"
             + "\n".join(f"  $ {c[:200]}" for c in ep["bash_commands"][:15])
         )
 
+    # 7. Files touched — read + written combined for brevity
+    files_touched: list[str] = []
     if ep["files_read"]:
-        parts.append("## Files read\n" + "\n".join(ep["files_read"][:10]))
-
+        files_touched.extend(f"read: {f}" for f in ep["files_read"][:10])
     if ep["files_written"]:
-        parts.append("## Files written/edited\n" + "\n".join(ep["files_written"][:10]))
+        files_touched.extend(f"wrote: {f}" for f in ep["files_written"][:10])
+    if files_touched:
+        parts.append("## Files touched\n" + "\n".join(files_touched))
 
+    # 8. Context compaction — verbose; only when it happened
     if ep["compaction_summary"]:
         parts.append(f"## Context compaction occurred\n{ep['compaction_summary'][:300]}")
 
+    # 9. Token usage
     tok = ep["token_stats"]
     parts.append(
         f"## Token usage: input={tok['input']} output={tok['output']} "
         f"cache_create={tok['cache_create']} cache_read={tok['cache_read']}"
     )
 
-    # Summarise tool call sequence
+    # 10. Tool sequence — bulkier; safe to truncate to the last 30 tools
     tool_seq = [tc["tool"] for tc in ep["tool_calls"][:30]]
     parts.append(f"## Tool sequence ({len(ep['tool_calls'])} total)\n{' → '.join(tool_seq)}")
-
-    # Last assistant message (most diagnostic)
-    if ep["assistant_text"]:
-        last = ep["assistant_text"][-1][:800]
-        parts.append(f"## Final assistant message\n{last}")
 
     return "\n\n".join(parts)
 

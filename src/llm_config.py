@@ -151,6 +151,13 @@ REFLECTION_MAX_TOKENS = 8192
 # 512 is generous.
 EVAL_MAX_TOKENS = 512
 
+# Token budget for task generation. Each generated task dict is ~300-400 output
+# tokens (task_description + domain_context + pitfalls + success_criteria). The
+# legacy EVAL_MAX_TOKENS * 8 = 4096 budget was too tight for 20+ tasks —
+# truncation above ~15 tasks caused silent fallback to the built-in library.
+# 8192 leaves headroom for 20 tasks at ~400 tokens each.
+TASK_GEN_MAX_TOKENS = 8192
+
 # MiniMax M2.7 token budgets — lower than Sonnet to prevent timeouts
 # M2.7 "reads everything first" behavior can cause timeouts; strict budgets help
 # Reflection is limited to 4096 since M2.7 is verbose even with thinking

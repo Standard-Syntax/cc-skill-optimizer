@@ -8,9 +8,14 @@ Tests llm_judge_score() function in src/evaluator.py.
 import json
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+# Ensure src/ is on the path so evaluator.py's `from utils import` resolves correctly
+_SRC = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(_SRC))
 
 # Sample episode dict for testing
 SAMPLE_EPISODE = {
@@ -100,8 +105,8 @@ class TestJudgeSkillTruncation:
         assert len(skill_section) == 5000, f"Expected 5000 chars, got {len(skill_section)}"
         print(f"PASS: Full 5000 chars passed through ({len(skill_section)} chars)")
 
-    def test_candidate_skill_exactly_8000_chars(self):
-        """Test: candidate_skill exactly 8000 chars — full text passed."""
+    def test_candidate_skill_exactly_6000_chars(self):
+        """Test: candidate_skill exactly 6000 chars — full text passed."""
         import importlib
 
         from src import evaluator as ev
@@ -109,7 +114,7 @@ class TestJudgeSkillTruncation:
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
 
-        skill_8000 = make_skill(8000)
+        skill_6000 = make_skill(6000)
 
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
@@ -117,18 +122,18 @@ class TestJudgeSkillTruncation:
         assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
-        score, reasoning = llm_judge_score(skill_8000, SAMPLE_EPISODE, "test/model")
+        score, reasoning = llm_judge_score(skill_6000, SAMPLE_EPISODE, "test/model")
 
         call_args = mock_litellm_instance.completion.call_args
         messages = call_args.kwargs["messages"]
         user_msg = next(m["content"] for m in messages if m["role"] == "user")
         skill_section = user_msg.split("SKILL.md:\n")[1].split("\n\nEpisode:")[0]
 
-        assert len(skill_section) == 8000, f"Expected 8000 chars, got {len(skill_section)}"
-        print(f"PASS: Exactly 8000 chars passed ({len(skill_section)})")
+        assert len(skill_section) == 6000, f"Expected 6000 chars, got {len(skill_section)}"
+        print(f"PASS: Exactly 6000 chars passed ({len(skill_section)})")
 
-    def test_candidate_skill_truncated_from_12000_to_8000(self):
-        """Test: candidate_skill > 8000 chars — truncated to 8000."""
+    def test_candidate_skill_truncated_from_10000_to_6000(self):
+        """Test: candidate_skill > 6000 chars — truncated to 6000."""
         import importlib
 
         from src import evaluator as ev
@@ -136,7 +141,7 @@ class TestJudgeSkillTruncation:
         importlib.reload(ev)
         from src.evaluator import llm_judge_score
 
-        skill_12000 = make_skill(12000)
+        skill_10000 = make_skill(10000)
 
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
@@ -144,16 +149,16 @@ class TestJudgeSkillTruncation:
         assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
-        score, reasoning = llm_judge_score(skill_12000, SAMPLE_EPISODE, "test/model")
+        score, reasoning = llm_judge_score(skill_10000, SAMPLE_EPISODE, "test/model")
 
         call_args = mock_litellm_instance.completion.call_args
         messages = call_args.kwargs["messages"]
         user_msg = next(m["content"] for m in messages if m["role"] == "user")
         skill_section = user_msg.split("SKILL.md:\n")[1].split("\n\nEpisode:")[0]
 
-        assert len(skill_section) == 8000, f"Expected 8000 chars, got {len(skill_section)}"
-        assert skill_12000.startswith(skill_section), "Truncated text should be prefix of original"
-        print(f"PASS: Truncated from 12000 to {len(skill_section)} chars")
+        assert len(skill_section) == 6000, f"Expected 6000 chars, got {len(skill_section)}"
+        assert skill_10000.startswith(skill_section), "Truncated text should be prefix of original"
+        print(f"PASS: Truncated from 10000 to {len(skill_section)} chars")
 
     def test_candidate_skill_very_long_50000_chars(self):
         """Test: candidate_skill very long (50000 chars) — truncated to 8000."""
@@ -179,11 +184,11 @@ class TestJudgeSkillTruncation:
         user_msg = next(m["content"] for m in messages if m["role"] == "user")
         skill_section = user_msg.split("SKILL.md:\n")[1].split("\n\nEpisode:")[0]
 
-        assert len(skill_section) == 8000, f"Expected 8000 chars, got {len(skill_section)}"
+        assert len(skill_section) == 6000, f"Expected 6000 chars, got {len(skill_section)}"
         print(f"PASS: Truncated from 50000 to {len(skill_section)} chars")
 
-    def test_episode_context_truncated_at_2000(self):
-        """Test: episode context (asi) truncation preserved at 2000."""
+    def test_episode_context_truncated_at_4000(self):
+        """Test: episode context (asi) truncation preserved at 4000."""
         import importlib
 
         from src import evaluator as ev
@@ -212,9 +217,67 @@ class TestJudgeSkillTruncation:
         # Extract Episode section
         episode_part = user_msg.split("Episode:\n")[1].split("\n\nOutput:")[0]
 
-        # Verify Episode is truncated to 2000
-        assert len(episode_part) <= 2000, f"Episode should be ≤2000 chars, got {len(episode_part)}"
-        print(f"PASS: Episode truncated to {len(episode_part)} chars (≤2000)")
+        # Verify Episode is truncated to 4000
+        assert len(episode_part) <= 4000, f"Episode should be ≤4000 chars, got {len(episode_part)}"
+        print(f"PASS: Episode truncated to {len(episode_part)} chars (≤4000)")
+
+    def test_asi_5000_truncated_to_4000(self):
+        """Test: a 5000-char episode_to_asi() output is truncated to 4000 (not 2000)."""
+        import importlib
+
+        from src import evaluator as ev
+
+        importlib.reload(ev)
+        from src.evaluator import llm_judge_score
+        from src.parse_session import episode_to_asi
+
+        # Construct an episode whose episode_to_asi() output exceeds 5000 chars.
+        # The current episode_to_asi() (pre-Phase 16.2) order includes task_prompt,
+        # outcome, errors, tool_calls, bash_commands, files_written, assistant_text.
+        # Build a "verbose" episode.
+        verbose_episode = {
+            "task_prompt": "X" * 1500,  # 1500 chars of task prompt
+            "outcome": "success",
+            "duration_s": 100.0,
+            "tool_calls": [
+                {"tool": "read", "file": f"file_{i}.py", "input_summary": "Y" * 200}
+                for i in range(20)
+            ],
+            "error_messages": ["Error: " + "Z" * 300] * 5,
+            "bash_commands": [f"command_{i} " + "A" * 100 for i in range(15)],
+            "files_read": [f"file_{i}.py" for i in range(20)],
+            "files_written": [f"out_{i}.py" for i in range(15)],
+            "compaction_summary": None,
+            "token_stats": {
+                "input": 1000, "output": 500, "cache_create": 200, "cache_read": 300,
+            },
+            "assistant_text": ["W" * 1500],
+        }
+        asi_text = episode_to_asi(verbose_episode)
+        assert len(asi_text) > 5000, (
+            f"Test setup wrong: expected episode_to_asi() to produce >5000 chars, got {len(asi_text)}"
+        )
+
+        # Now call llm_judge_score and verify the user_msg Episode section is truncated to 4000
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = json.dumps({"score": 0.7, "reasoning": "Good"})
+        assert mock_litellm_instance is not None
+        mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
+
+        score, reasoning = llm_judge_score("short skill", verbose_episode, "test/model")
+
+        call_args = mock_litellm_instance.completion.call_args
+        messages = call_args.kwargs["messages"]
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+
+        # Extract the Episode section (between "Episode:\n" and "\n\nOutput:")
+        episode_part = user_msg.split("Episode:\n")[1].split("\n\nOutput:")[0]
+        assert len(episode_part) == 4000, (
+            f"Expected Episode truncated to exactly 4000 chars, got {len(episode_part)}. "
+            f"This indicates the cap is still 2000."
+        )
+        print("PASS: 5000-char ASI truncated to 4000 chars (cap raised from 2000)")
 
     def test_score_output_format(self):
         """Test: score output format — parsed correctly."""

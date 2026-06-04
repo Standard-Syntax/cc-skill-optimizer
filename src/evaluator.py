@@ -133,14 +133,23 @@ def _build_feedback(episode: dict, side_info: dict) -> str:
 
 
 def _outcome_score(episode: dict) -> float:
-    """Convert episode outcome to a base score [0, 1]."""
+    """Convert episode outcome to a base score [0, 1].
+
+    Episodes with outcome="unknown" and neutral_closing=True (secondary
+    heuristic: no errors + files written) map to 0.7 instead of 0.5,
+    reflecting strong completion signals that did not reach the explicit
+    success path. See parse_session.py:neutral_closing for the trigger.
+    """
+    outcome = episode.get("outcome", "unknown")
+    if outcome == "unknown" and episode.get("neutral_closing"):
+        return 0.7
     mapping = {
         "success": 1.0,
         "unknown": 0.5,
         "interrupted": 0.3,
         "error": 0.0,
     }
-    return mapping.get(episode.get("outcome", "unknown"), 0.5)
+    return mapping.get(outcome, 0.5)
 
 
 def _efficiency_bonus(episode: dict, thresholds: dict | None = None) -> float:
@@ -239,7 +248,11 @@ _JUDGE_SYSTEM = (
     "- A candidate SKILL.md\n"
     "- A session episode (tool calls, errors, outcome)\n\n"
     "Score 0.0–1.0: how much would this skill have helped the agent?\n"
-    "Consider: error prevention, tool efficiency, context window usage.\n\n"
+    "Consider: error prevention, tool efficiency, context window usage.\n"
+    "Format quality also matters: a well-formed skill is under 2000 tokens, "
+    "uses markdown headers and numbered lists, and contains repo-specific commands "
+    "rather than generic advice. Penalise skills that are vague, overly long, or "
+    "repeat information the agent would already know.\n\n"
     "Output ONLY valid JSON on one line — no preamble, no markdown:\n"
     '{"score": <float>, "reasoning": "<one sentence>"}'
 )
@@ -264,12 +277,16 @@ def llm_judge_score(
 
     asi = episode_to_asi(episode)
 
-    # Truncate to 8000 chars to expose the full ~2K-token SKILL.md to the judge.
-    # Future work: implement two-pass scoring (split candidate at midpoint, judge
-    # each half, average the scores) to handle skills > 8000 chars without bias.
+    # Truncation budget: skill 6000 + episode 4000 = ~10K chars total.
+    # The reflection LM benefits from fuller tool_calls and complete test output
+    # (gskill/optimize_anything paper, 2026); raising the episode cap to 4000
+    # lets episode_to_asi() surface more of the high-signal tool/command
+    # sequence (after Phase 16.2 reorders sections). The skill cap is lowered
+    # slightly to keep the total prompt around 10K chars. 2K-token SKILL.md is
+    # the project's default target size; 6K chars is well above that.
     user_msg = (
-        f"SKILL.md:\n{candidate_skill[:8000]}\n\n"
-        f"Episode:\n{asi[:2000]}\n\n"
+        f"SKILL.md:\n{candidate_skill[:6000]}\n\n"
+        f"Episode:\n{asi[:4000]}\n\n"
         'Output: {"score": <0-1>, "reasoning": "<one sentence>"}'
     )
 

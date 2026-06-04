@@ -538,17 +538,28 @@ def generate_tasks_for_domain(
 
     print(f"[synthetic] Generating {n} tasks for domain='{domain}' via {judge_lm} ...")
     try:
+        # Import TASK_GEN_MAX_TOKENS with fallback
+        try:
+            from llm_config import TASK_GEN_MAX_TOKENS
+        except ImportError:
+            TASK_GEN_MAX_TOKENS = 8192  # fallback to the same value as the constant
+
         resp = litellm.completion(
             model=judge_lm,
             messages=[
                 {"role": "system", "content": _TASK_GEN_SYSTEM},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=EVAL_MAX_TOKENS * 8,  # task gen needs more room than scoring
+            max_tokens=TASK_GEN_MAX_TOKENS,  # dedicated budget for task generation (8192)
             **INFERENCE_PARAMS,
         )
         raw = resp.choices[0].message.content or "[]"
         tasks = _parse_llm_json(raw, [])
+        if isinstance(tasks, list) and len(tasks) < n:
+            print(
+                f"[synthetic] WARNING: requested {n} tasks but got {len(tasks)}. "
+                f"Response may have been truncated. Consider reducing --generate-tasks."
+            )
         print(f"[synthetic] Generated {len(tasks)} tasks")
         return tasks
     except Exception as exc:
@@ -589,16 +600,19 @@ def structural_score(candidate: str) -> tuple[float, dict]:
     breakdown: dict[str, float] = {}
     total = 0.0
 
-    # 1. Length check (target: 500-3000 chars; 1000-2000 is sweet spot)
+    # 1. Length check. The Decagon ablation study (March 2026) found 1,500-char
+    # skills with high specificity outperform 5,000-char ones. Sweet spot is
+    # tightened from [800, 2500] to [600, 1800]; the bloat penalty for >3000
+    # chars is strengthened from 0.04 to 0.02 (was too lenient).
     n = len(candidate)
-    if 800 <= n <= 2500:
+    if 600 <= n <= 1800:
         length_score = 0.15
-    elif 500 <= n < 800 or 2500 < n <= 4000:
+    elif 400 <= n < 600 or 1800 < n <= 3000:
         length_score = 0.08
     elif n < 200:
         length_score = 0.0
     else:
-        length_score = 0.04  # too long
+        length_score = 0.02  # too long (>3000 chars; strong bloat penalty)
     breakdown["length"] = length_score
     total += length_score
 
@@ -610,11 +624,17 @@ def structural_score(candidate: str) -> tuple[float, dict]:
         else:
             breakdown[f"section_{name}"] = 0.0
 
-    # 3. Specificity (inline code, tool names, file paths)
+    # 3. Specificity DENSITY (hits per 100 words, not raw count). A 4000-char
+    # skill with 12 inline-code references no longer scores higher than a
+    # 1200-char skill with 10 references — the shorter skill is more
+    # actionable per word. Multiplier 0.05 caps the score at 0.20 when the
+    # density exceeds 4 hits per 100 words (~1 per 25 words).
     specificity_hits = sum(
         len(_COMPILED_SPECIFICITY[i].findall(candidate)) for i in range(len(_SPECIFICITY_PATTERNS))
     )
-    specificity_score = min(0.20, specificity_hits * 0.015)
+    word_count = max(1, len(candidate.split()))
+    specificity_density = specificity_hits / word_count * 100  # hits per 100 words
+    specificity_score = min(0.20, specificity_density * 0.05)
     breakdown["specificity"] = specificity_score
     total += specificity_score
 

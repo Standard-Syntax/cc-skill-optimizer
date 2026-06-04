@@ -133,6 +133,14 @@ logging.basicConfig(level=logging.WARNING)
 
 # Imports — handle both "python optimize.py" (from project root) and "python -m optimize" (from src/ dir)
 try:
+    # Shared DSPy infrastructure for run_dspy_gepa and run_dspy_native_gepa
+    # (Phase 17.2: extracted from inline duplicates in both functions)
+    from src.dspy_shared import (  # noqa: F401 — used by run_dspy_gepa / run_dspy_native_gepa
+        SkillGuidedTask,  # noqa: F401 — base class inside SkillProgram (ruff can't trace dspy.Predict usage)
+        SkillProgram,
+        _ideal_completion_from_episode,  # noqa: F401 — used inside ep_to_example
+        ep_to_example,
+    )
     from src.evaluator import make_replay_evaluator
     from src.llm_config import (
         DEFAULT_MODEL,
@@ -163,7 +171,14 @@ except ImportError:
     _src_path = str(Path(__file__).parent / "src")
     if _src_path not in sys.path:
         sys.path.insert(0, _src_path)
+    # Shared DSPy helpers (same as the try: block above)
     import llm_config  # noqa: F401 — provides DEFAULT_MODEL, REFLECTION_MODEL, THINKING_CONFIG_* constants
+    from dspy_shared import (  # noqa: F401 — used by run_dspy_gepa / run_dspy_native_gepa
+        SkillGuidedTask,  # noqa: F401 — base class inside SkillProgram (ruff can't trace dspy.Predict usage)
+        SkillProgram,
+        _ideal_completion_from_episode,  # noqa: F401 — used inside ep_to_example
+        ep_to_example,
+    )
     from evaluator import make_replay_evaluator  # noqa: F401
     from llm_config import (  # noqa: F401
         DEFAULT_MODEL,
@@ -227,17 +242,34 @@ def _model_uses_thinking(model_str: str) -> bool:
 
 def split_corpus(
     episodes: list[dict],
-    train_frac: float = 0.70,
+    train_frac: float = 0.80,
     val_frac: float = 0.20,
+    test_frac: float = 0.0,
     seed: int = 42,
 ) -> tuple[list[dict], list[dict], list[dict]]:
+    """Split episodes into train/val/test sets.
+
+    Default 80/20/0 matches the GEPA FAQ recommendation: "80/20 when total
+    datapoints exceed 200; 50/50 when fewer than 200". The unused test slice
+    in the legacy 70/20/10 default wasted episodes on small corpora.
+
+    If train_frac + val_frac + test_frac < 1.0, the remaining episodes are
+    silently dropped (the legacy behavior — the remainder was implicitly the
+    test set). Set test_frac=0.10 explicitly to reproduce the legacy 70/20/10
+    split.
+    """
     rng = random.Random(seed)
     shuffled = episodes[:]
     rng.shuffle(shuffled)
     n = len(shuffled)
     t = int(n * train_frac)
     v = int(n * val_frac)
-    return shuffled[:t], shuffled[t : t + v], shuffled[t + v :]
+    te = int(n * test_frac)
+    # Clamp so indices never exceed n
+    end_train = min(t, n)
+    end_val = min(t + v, n)
+    end_test = min(t + v + te, n)
+    return shuffled[:end_train], shuffled[end_train:end_val], shuffled[end_val:end_test]
 
 
 # ---------------------------------------------------------------------------
@@ -528,24 +560,55 @@ def make_multi_evaluator(
     Wraps a base evaluator so it works with dict candidates.
 
     GEPA calls evaluate(candidate, example) where candidate is dict[str,str].
-    We concatenate all components into a single skill_md string, then score
-    using the base evaluator which expects a plain string (the SKILL.md content).
 
-    For replay mode (no live Claude Code), we just score the skill_md component.
+    Phase 16.3 change: We always concatenate ALL components into the scored
+    text (was: only score the primary "skill_md" or "claude_md" component).
+    This makes multi-component Pareto meaningful — the score reflects the
+    full candidate package, not just one file.
+
+    For multi-objective Pareto tracking via `frontier_type="hybrid"`, we
+    also score each component individually and expose the per-component
+    scores via `side_info["scores"]`. GEPA reads this shape natively
+    (gepa>=0.1.1) and maintains per-objective frontiers automatically.
     """
 
     def evaluate(candidate: dict[str, str], example) -> tuple[float, dict]:
-        # Extract the primary skill text for heuristic scoring
-        skill_text = candidate.get("skill_md") or candidate.get("claude_md") or ""
-        if not skill_text:
-            # Fall back to concatenating all components
-            skill_text = "\n\n".join(f"# {k}\n{v}" for k, v in candidate.items())
+        # Always concatenate ALL components for scoring (was: only the primary one)
+        combined_text = "\n\n".join(f"# {k}\n{v}" for k, v in candidate.items())
 
-        score, side_info = base_evaluator(skill_text, example)
+        # Score the full candidate. The combined call IS the canonical score; if it
+        # fails, we fall back to score=0.0 with the error in side_info so the optimizer
+        # can see what happened. Per-component scoring below is still best-effort.
+        try:
+            score, side_info = base_evaluator(combined_text, example)
+        except Exception as exc:
+            score = 0.0
+            side_info = {
+                "error": f"base_evaluator failed on combined candidate: {exc}",
+                "components": {k: len(v) for k, v in candidate.items()},
+                "n_components": len(candidate),
+            }
 
         # Add per-component metadata to ASI so GEPA can diagnose per-file issues
-        side_info["components"] = {k: len(v) for k, v in candidate.items()}
-        side_info["n_components"] = len(candidate)
+        side_info.setdefault("components", {k: len(v) for k, v in candidate.items()})
+        side_info.setdefault("n_components", len(candidate))
+
+        # Per-component scores for multi-objective Pareto (gepa reads side_info["scores"])
+        # for frontier_type="hybrid". Each component is scored independently against
+        # the same example; the side_info from each per-component call is discarded —
+        # only the scalar score is retained. The loop is best-effort: a single
+        # failure sets that component's score to 0.0 without breaking the eval.
+        component_scores: dict[str, float] = {}
+        for key, text in candidate.items():
+            try:
+                comp_score, _ = base_evaluator(text, example)
+                component_scores[key] = float(comp_score)
+            except Exception:
+                # Per-component scoring is best-effort; a single failure shouldn't
+                # break the whole evaluation
+                component_scores[key] = 0.0
+        side_info["scores"] = component_scores
+
         return score, side_info
 
     return evaluate
@@ -689,29 +752,51 @@ def make_nested_evaluator(
     GEPA calls evaluate(candidate, example) where candidate is dict[str,str].
     Each key is a file path (e.g., "CLAUDE.md", "src/CLAUDE.md").
 
-    The evaluator scores based on the root-level file (root_key) as the primary
-    entry point, but includes metadata about all files in the ASI so GEPA can
-    diagnose issues at any level.
+    Phase 16.3 change: We always concatenate ALL nested files into the scored
+    text (was: only score the root_key file as the primary entry point).
+    This makes nested-file Pareto meaningful — the score reflects the full
+    nested candidate package, not just the root file.
+
+    For multi-objective Pareto tracking via `frontier_type="hybrid"`, we
+    also score each file individually and expose the per-file scores via
+    `side_info["scores"]`. GEPA reads this shape natively (gepa>=0.1.1).
     """
 
     def evaluate(candidate: dict[str, str], example) -> tuple[float, dict]:
-        # Extract the primary file content for scoring
-        primary_text = candidate.get(root_key) or ""
-        if not primary_text and candidate:
-            # Fallback: prefer root-level files (no "/" in key) — these are the
-            # primary context files (CLAUDE.md, AGENTS.md, SKILL.md). Then fall
-            # back to alphabetical order. The shortest-file heuristic was flawed:
-            # the shortest file is often a stub or minimal subsection config.
-            root_keys = [k for k in candidate if "/" not in k]
-            fallback_key = sorted(root_keys)[0] if root_keys else sorted(candidate)[0]
-            primary_text = candidate[fallback_key]
+        # Always concatenate ALL files for scoring (was: only the root_key file)
+        combined_text = "\n\n".join(f"# {k}\n{v}" for k, v in candidate.items())
 
-        score, side_info = base_evaluator(primary_text, example)
+        # Score the full candidate. The combined call IS the canonical score; if it
+        # fails, we fall back to score=0.0 with the error in side_info so the optimizer
+        # can see what happened. Per-file scoring below is still best-effort.
+        try:
+            score, side_info = base_evaluator(combined_text, example)
+        except Exception as exc:
+            score = 0.0
+            side_info = {
+                "error": f"base_evaluator failed on combined candidate: {exc}",
+                "nested_files": {k: len(v) for k, v in candidate.items()},
+                "n_nested_files": len(candidate),
+                "nested_file_keys": list(candidate.keys()),
+            }
 
         # Add per-file metadata to ASI so GEPA can diagnose per-file issues
-        side_info["nested_files"] = {k: len(v) for k, v in candidate.items()}
-        side_info["n_nested_files"] = len(candidate)
-        side_info["nested_file_keys"] = list(candidate.keys())
+        side_info.setdefault("nested_files", {k: len(v) for k, v in candidate.items()})
+        side_info.setdefault("n_nested_files", len(candidate))
+        side_info.setdefault("nested_file_keys", list(candidate.keys()))
+
+        # Per-file scores for multi-objective Pareto (gepa reads side_info["scores"])
+        # for frontier_type="hybrid". Each file is scored independently against
+        # the same example; the side_info from each per-file call is discarded.
+        component_scores: dict[str, float] = {}
+        for key, text in candidate.items():
+            try:
+                comp_score, _ = base_evaluator(text, example)
+                component_scores[key] = float(comp_score)
+            except Exception:
+                # Per-file scoring is best-effort
+                component_scores[key] = 0.0
+        side_info["scores"] = component_scores
 
         return score, side_info
 
@@ -811,6 +896,45 @@ def save_sections_output(
 # ---------------------------------------------------------------------------
 
 
+def make_length_constrained_proposer(max_chars: int = 2000):
+    """Returns a custom GEPA proposer that injects a character-limit constraint
+    into the reflection prompt. Prevents prompt bloat from accumulating across
+    iterations — the single largest overfitting risk in long optimization runs.
+
+    Reference: Decagon ablation study (March 2026) — 1,500-char constraint
+    achieved 4× compression, -0.8% performance, +generalization.
+
+    Args:
+        max_chars: The character limit to enforce on the SKILL.md output. Default
+            2000 matches the 2K-token SKILL.md target.
+
+    Returns:
+        A callable `proposer(current_candidate, reflective_dataset, components_to_update)`
+        that appends a length constraint to each item's feedback in
+        reflective_dataset, then returns None to delegate to GEPA's default proposer.
+    """
+    from gepa.optimize_anything import ProposalFn  # lazy import; not needed at module load
+
+    def proposer(current_candidate, reflective_dataset, components_to_update):
+        # The default proposer's output is string | dict[str, str]. We inject the
+        # length constraint into the reflection context by appending to each
+        # item's feedback before proposing. Returning None tells GEPA to use its
+        # default proposer with the enriched data.
+        constraint_note = (
+            f"\n\nIMPORTANT: The skill MUST be under {max_chars} characters. "
+            f"Prefer concise, specific bullets over verbose paragraphs. "
+            f"If the current draft exceeds {max_chars} chars, aggressively prune "
+            f"generic advice and keep only repo-specific, actionable guidance."
+        )
+        for item in reflective_dataset:
+            item["feedback"] = item.get("feedback", "") + constraint_note
+        # Returning None tells GEPA to use its default proposer with the (mutated) data
+        _ = ProposalFn  # silence the unused-import lint; the type is for documentation
+        return None
+
+    return proposer
+
+
 def run_gepa_optimize_anything(
     seed_candidate: str | dict[str, str],
     train_set: list[dict],
@@ -833,6 +957,7 @@ def run_gepa_optimize_anything(
     max_evals_override: int | None = None,
     target: str | None = None,
     proposer: str = "batch",
+    max_skill_chars: int = 2000,
 ) -> str | dict[str, str]:
     """
     Run gepa.optimize_anything and return the best candidate.
@@ -919,6 +1044,8 @@ def run_gepa_optimize_anything(
                 # Replay path: 50+ episode corpus → 5 spans failure modes well;
                 # smaller minibatch would miss rare-but-important failure patterns.
                 reflection_minibatch_size=GEPA_REFLECTION_MINIBATCH_REPLAY,
+                # Phase 18.1: length-constrained proposer to prevent prompt bloat
+                custom_candidate_proposer=make_length_constrained_proposer(max_skill_chars),
             ),
         ),
     )
@@ -1002,7 +1129,13 @@ def run_dspy_gepa(
 ) -> str:
     """
     Use dspy.MIPROv2 to optimize the skill as a DSPy Predict signature.
-    This is more powerful but requires the DSPy program abstraction.
+    Returns the optimized skill content as a string.
+
+    NOTE — DSPy path output format:
+      This DSPy path extracts DSPy's internal `signature.instructions` field
+      after optimization, NOT a SKILL.md file. So the output format differs
+      from GEPA's `optimize_anything` path which writes `best_candidate.md`.
+      The file written by this function is `best_candidate_dspy.md`.
     """
     import dspy
     from dspy import MIPROv2
@@ -1036,70 +1169,29 @@ def run_dspy_gepa(
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
     reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
 
-    # DSPy Signature: given task + context, produce high-quality response
-    class SkillGuidedTask(dspy.Signature):
-        """Apply repository skills to complete a software engineering task."""
-
-        skill_instructions: str = dspy.InputField(desc="SKILL.md content guiding the agent")
-        task_prompt: str = dspy.InputField(desc="The software engineering task to complete")
-        error_context: str = dspy.InputField(
-            desc="Prior errors and context from the session", default=""
-        )
-        completion: str = dspy.OutputField(
-            desc="How the agent should approach and complete this task"
-        )
-
-    class SkillProgram(dspy.Module):
-        def __init__(self, skill_content: str):
-            self.skill_content = skill_content
-            self.predictor = dspy.Predict(SkillGuidedTask)
-
-        def forward(self, task_prompt: str, error_context: str = "") -> dspy.Prediction:
-            return self.predictor(
-                skill_instructions=self.skill_content,
-                task_prompt=task_prompt,
-                error_context=error_context,
-            )
-
-    # Convert episodes to DSPy Examples
-    def ep_to_example(ep: dict) -> dspy.Example:
-        errors = "; ".join(ep.get("error_messages", [])[:2])
-        return dspy.Example(
-            task_prompt=ep.get("task_prompt", ""),
-            error_context=errors,
-            # Gold: describe the ideal outcome based on actual session data
-            completion=_ideal_completion_from_episode(ep),
-        ).with_inputs("task_prompt", "error_context")
-
-    def _ideal_completion_from_episode(ep: dict) -> str:
-        """Construct a gold-standard completion hint from the real session."""
-        parts = []
-        outcome = ep.get("outcome", "unknown")
-        if outcome == "success":
-            parts.append("Successfully completed the task with minimal tool calls.")
-        elif outcome == "error":
-            parts.append(
-                "Task encountered errors. The key issues were: "
-                + "; ".join(ep.get("error_messages", ["unknown"])[:2])
-            )
-        cmds = ep.get("bash_commands", [])[:3]
-        if cmds:
-            parts.append("Key commands: " + "; ".join(cmds))
-        return " ".join(parts) or "Task completed."
-
     dspy_train = [ep_to_example(ep) for ep in train_set if ep.get("task_prompt")]
     dspy_val = [ep_to_example(ep) for ep in val_set if ep.get("task_prompt")]
 
-    # Metric: score based on episode quality signals
-    def metric(gold: dspy.Example, pred: dspy.Prediction, trace=None) -> float:
+    # Metric: dspy 3.x GEPAFeedbackMetric signature — returns dspy.Prediction so the
+    # reflection LM can iterate on failure modes via the feedback field. This is
+    # the SAME contract as run_dspy_native_gepa, for consistency.
+    def metric(
+        gold: dspy.Example,
+        pred: dspy.Prediction,
+        trace=None,
+    ) -> dspy.Prediction:
         # Find the matching episode for this gold example
         for ep in train_set + val_set:
             if ep.get("task_prompt", "")[:100] == gold.task_prompt[:100]:
                 from evaluator import score_episode
 
-                score, _ = score_episode(ep)
-                return score
-        return 0.5
+                score, side_info = score_episode(ep)
+                feedback = side_info.get("feedback", "")
+                return dspy.Prediction(score=score, feedback=feedback)
+        return dspy.Prediction(
+            score=0.5,
+            feedback="No matching episode found for gold example.",
+        )
 
     program = SkillProgram(seed_candidate)
     # dspy 3.0: per-module LM injection (replaces legacy dspy.configure global config)
@@ -1196,58 +1288,6 @@ def run_dspy_native_gepa(
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
     reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
 
-    # DSPy Signature: given task + context, produce high-quality response
-    # (Duplicated from run_dspy_gepa for self-containment; dspy.GEPA uses the same
-    #  SkillGuidedTask signature but the metric returns dspy.Prediction for feedback.)
-    class SkillGuidedTask(dspy.Signature):
-        """Apply repository skills to complete a software engineering task."""
-
-        skill_instructions: str = dspy.InputField(desc="SKILL.md content guiding the agent")
-        task_prompt: str = dspy.InputField(desc="The software engineering task to complete")
-        error_context: str = dspy.InputField(
-            desc="Prior errors and context from the session", default=""
-        )
-        completion: str = dspy.OutputField(
-            desc="How the agent should approach and complete this task"
-        )
-
-    class SkillProgram(dspy.Module):
-        def __init__(self, skill_content: str):
-            self.skill_content = skill_content
-            self.predictor = dspy.Predict(SkillGuidedTask)
-
-        def forward(self, task_prompt: str, error_context: str = "") -> dspy.Prediction:
-            return self.predictor(
-                skill_instructions=self.skill_content,
-                task_prompt=task_prompt,
-                error_context=error_context,
-            )
-
-    # Convert episodes to DSPy Examples
-    def ep_to_example(ep: dict) -> dspy.Example:
-        errors = "; ".join(ep.get("error_messages", [])[:2])
-        return dspy.Example(
-            task_prompt=ep.get("task_prompt", ""),
-            error_context=errors,
-            completion=_ideal_completion_from_episode(ep),
-        ).with_inputs("task_prompt", "error_context")
-
-    def _ideal_completion_from_episode(ep: dict) -> str:
-        """Construct a gold-standard completion hint from the real session."""
-        parts = []
-        outcome = ep.get("outcome", "unknown")
-        if outcome == "success":
-            parts.append("Successfully completed the task with minimal tool calls.")
-        elif outcome == "error":
-            parts.append(
-                "Task encountered errors. The key issues were: "
-                + "; ".join(ep.get("error_messages", ["unknown"])[:2])
-            )
-        cmds = ep.get("bash_commands", [])[:3]
-        if cmds:
-            parts.append("Key commands: " + "; ".join(cmds))
-        return " ".join(parts) or "Task completed."
-
     dspy_train = [ep_to_example(ep) for ep in train_set if ep.get("task_prompt")]
     dspy_val = [ep_to_example(ep) for ep in val_set if ep.get("task_prompt")]
 
@@ -1330,6 +1370,7 @@ def run_gepa_synthetic(
     nested_root: Path | None = None,
     frontier_type: str = "instance",
     max_evals_override: int | None = None,
+    max_skill_chars: int = 2000,
 ) -> str | dict[str, str]:
     """Run gepa.optimize_anything with synthetic task-based evaluation."""
     from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, optimize_anything
@@ -1386,6 +1427,8 @@ def run_gepa_synthetic(
                 reflection_lm=reflection_lm,
                 # Synthetic path: 20-task library → 4 is enough without exhausting the library.
                 reflection_minibatch_size=GEPA_REFLECTION_MINIBATCH_SYNTHETIC,
+                # Phase 18.1: length-constrained proposer to prevent prompt bloat
+                custom_candidate_proposer=make_length_constrained_proposer(max_skill_chars),
             ),
         ),
     )
@@ -1532,8 +1575,18 @@ def main() -> None:
     )
     ap.add_argument("--claude-dir", default=str(DEFAULT_CLAUDE_DIR))
     ap.add_argument("--min-tool-calls", type=int, default=2)
-    ap.add_argument("--train-frac", type=float, default=0.70)
-    ap.add_argument("--val-frac", type=float, default=0.20)
+    ap.add_argument("--train-frac", type=float, default=0.80,
+                    help="Fraction of episodes for training (default 0.80; GEPA FAQ recommends 80/20).")
+    ap.add_argument("--val-frac", type=float, default=0.20,
+                    help="Fraction of episodes for validation (default 0.20).")
+    ap.add_argument("--test-frac", type=float, default=0.0,
+                    help="Fraction of episodes for held-out test set (default 0.0; was 0.10 in legacy 70/20/10 split).")
+    ap.add_argument(
+        "--max-skill-chars",
+        type=int,
+        default=2000,
+        help="Character limit for the optimized SKILL.md (default 2000; Decagon study found 1500-char constraint improves generalization)",
+    )
 
     # Synthetic-mode args
     ap.add_argument(
@@ -1813,6 +1866,7 @@ def main() -> None:
                 nested_root=nested_root,
                 frontier_type=_gepa_frontier_type,
                 max_evals_override=effective_max_evals,
+                max_skill_chars=args.max_skill_chars,
             )
 
     else:
@@ -1834,7 +1888,7 @@ def main() -> None:
             sys.exit(1)
 
         train_set, val_set, test_set = split_corpus(
-            episodes, args.train_frac, args.val_frac, args.seed
+            episodes, args.train_frac, args.val_frac, args.test_frac, args.seed
         )
 
         # With very few episodes, the percentage-based split produces unusable
@@ -1904,6 +1958,7 @@ def main() -> None:
                 max_evals_override=effective_max_evals,
                 target=args.target,
                 proposer=args.proposer,
+                max_skill_chars=args.max_skill_chars,
             )
 
     print("\n" + "=" * 60)
