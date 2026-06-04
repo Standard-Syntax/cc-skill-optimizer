@@ -23,6 +23,7 @@ class TestMakeMultiEvaluator(unittest.TestCase):
 
         docstring = make_multi_evaluator.__doc__
         self.assertIsNotNone(docstring)
+        assert docstring is not None
         self.assertIn("dict candidate", docstring)
         self.assertIn("GEPA", docstring)
 

@@ -74,7 +74,9 @@ class TestM2_7JudgeDispatch:
                     mock_fn if expected_fn is judge_score_task_m2_7 else mock_fn,
                 ):
                     with suppress(Exception):
-                        score, info = evaluate("test candidate", tasks[0])  # May fail due to mocking
+                        score, info = evaluate(
+                            "test candidate", tasks[0]
+                        )  # May fail due to mocking
 
         # The more reliable way: check the closure directly via globals inspection
         # We can check by patching at the module level and seeing which gets invoked
@@ -95,8 +97,10 @@ class TestM2_7JudgeDispatch:
         for judge_lm, expected_fn in test_cases:
             tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-            with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-                 mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+            with (
+                mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+                mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+            ):
                 # Set return values so evaluate doesn't fail
                 mock_default.return_value = (0.5, {"judge_score": 0.5})
                 mock_m27.return_value = (0.5, {"judge_score": 0.5})
@@ -133,8 +137,10 @@ class TestM2_7JudgeDispatch:
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
         # Patch BEFORE creating evaluators to ensure proper dispatch happens
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.5, {"judge_score": 0.5})
             mock_m27.return_value = (0.5, {"judge_score": 0.5})
 
@@ -164,8 +170,10 @@ class TestM2_7JudgeDispatch:
         """Patch judge_score_task_m2_7 to record a call, verify it's called for M2.7 model."""
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.5, {"judge_score": 0.5})
             mock_m27.return_value = (0.7, {"judge_score": 0.7})
 
@@ -187,8 +195,10 @@ class TestM2_7JudgeDispatch:
         """Verify default judge is called for non-M2.7 models."""
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.8, {"judge_score": 0.8})
             mock_m27.return_value = (0.7, {"judge_score": 0.7})
 
@@ -210,8 +220,10 @@ class TestM2_7JudgeDispatch:
         """Set use_judge=False, verify neither judge function is called."""
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.5, {"judge_score": 0.5})
             mock_m27.return_value = (0.5, {"judge_score": 0.5})
 
@@ -307,8 +319,10 @@ class TestDispatchLogicEdgeCases:
         """Model string with m2.7 followed by other text."""
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.5, {"judge_score": 0.5})
             mock_m27.return_value = (0.5, {"judge_score": 0.5})
 
@@ -328,8 +342,10 @@ class TestDispatchLogicEdgeCases:
         """m2.7 in lowercase mixed with other case."""
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.5, {"judge_score": 0.5})
             mock_m27.return_value = (0.5, {"judge_score": 0.5})
 
@@ -348,8 +364,10 @@ class TestDispatchLogicEdgeCases:
         """Model string with no m2.7 anywhere."""
         tasks = [{"task_description": "test", "pitfalls": [], "success_criteria": []}]
 
-        with mock.patch("synthetic_evaluator.judge_score_task") as mock_default, \
-             mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27:
+        with (
+            mock.patch("synthetic_evaluator.judge_score_task") as mock_default,
+            mock.patch("synthetic_evaluator.judge_score_task_m2_7") as mock_m27,
+        ):
             mock_default.return_value = (0.5, {"judge_score": 0.5})
             mock_m27.return_value = (0.5, {"judge_score": 0.5})
 

@@ -126,14 +126,15 @@ import logging
 import random
 import sys
 from pathlib import Path
+from typing import Literal, cast
 
 # Ensure WARNING level logging is enabled for the module
 logging.basicConfig(level=logging.WARNING)
 
 # Imports — handle both "python optimize.py" (from project root) and "python -m optimize" (from src/ dir)
 try:
-    from src.evaluator import make_replay_evaluator  # type: ignore
-    from src.llm_config import (  # type: ignore
+    from src.evaluator import make_replay_evaluator
+    from src.llm_config import (
         DEFAULT_MODEL,
         DIRECT_OUTPUT_PREFIX,
         EVAL_MAX_TOKENS,
@@ -141,15 +142,15 @@ try:
         REFLECTION_MODEL,
         THINKING_CONFIG_REFLECTION,
     )
-    from src.parse_session import DEFAULT_CLAUDE_DIR, build_corpus  # type: ignore
-    from src.section_parser import (  # type: ignore
+    from src.parse_session import DEFAULT_CLAUDE_DIR, build_corpus
+    from src.section_parser import (
         build_section_tree,
         load_sections_from_file,
         merge_sections,
         parse_sections,
         save_sections_to_file,
     )
-    from src.synthetic_evaluator import (  # type: ignore
+    from src.synthetic_evaluator import (
         generate_tasks_for_domain,
         judge_score_task,
         load_task_library,
@@ -850,9 +851,11 @@ def run_gepa_optimize_anything(
     from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, optimize_anything
 
     if proposer == "loop":
-        print("[gepa] --proposer loop requested. Note: gskill's create_loop_proposer is "
-              "only available when using gepa.gskill.gskill.train_optimize_anything wrapper. "
-              "Falling back to standard gepa batch proposer.")
+        print(
+            "[gepa] --proposer loop requested. Note: gskill's create_loop_proposer is "
+            "only available when using gepa.gskill.gskill.train_optimize_anything wrapper. "
+            "Falling back to standard gepa batch proposer."
+        )
 
     is_multi = isinstance(seed_candidate, dict)
 
@@ -886,7 +889,10 @@ def run_gepa_optimize_anything(
     print(f"  task_lm={task_lm}  reflection_lm={reflection_lm}")
     if is_multi or is_sections:
         for k in sorted(seed_candidate):
-            print(f"    {k}  ({len(seed_candidate[k]):,} chars)")
+            k_chars = (
+                len(seed_candidate[k]) if isinstance(seed_candidate, dict) else len(seed_candidate)
+            )
+            print(f"    {k}  ({k_chars:,} chars)")
     print()
 
     result = optimize_anything(
@@ -904,7 +910,9 @@ def run_gepa_optimize_anything(
                 cache_evaluation=True,
                 parallel=True,  # Replay evaluator is stateless → parallelise metric evaluation across episodes.
                 max_workers=GEPA_NUM_THREADS_DEFAULT,
-                frontier_type=frontier_type,
+                frontier_type=cast(
+                    Literal["instance", "objective", "hybrid", "cartesian"], frontier_type
+                ),
             ),
             reflection=ReflectionConfig(
                 reflection_lm=reflection_lm,
@@ -983,7 +991,7 @@ def run_gepa_optimize_anything(
 
 
 def run_dspy_gepa(
-    seed_candidate: str,
+    seed_candidate: str | dict[str, str],
     train_set: list[dict],
     val_set: list[dict],
     objective: str,
@@ -998,6 +1006,10 @@ def run_dspy_gepa(
     """
     import dspy
     from dspy import MIPROv2
+
+    # Normalize dict seed_candidate to str (DSPy only supports string-based skill content)
+    if isinstance(seed_candidate, dict):
+        seed_candidate = next(iter(seed_candidate.values()))
 
     # Guard: temperature is incompatible with extended thinking per llm_config.py.
     # The dspy.LM constructor below passes temperature=0.7 (task) and temperature=1.0
@@ -1023,7 +1035,6 @@ def run_dspy_gepa(
     # Configure DSPy LMs
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
     reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
-    dspy.configure(lm=task_lm_obj)
 
     # DSPy Signature: given task + context, produce high-quality response
     class SkillGuidedTask(dspy.Signature):
@@ -1091,6 +1102,8 @@ def run_dspy_gepa(
         return 0.5
 
     program = SkillProgram(seed_candidate)
+    # dspy 3.0: per-module LM injection (replaces legacy dspy.configure global config)
+    program.set_lm(task_lm_obj)
 
     optimizer = MIPROv2(
         metric=metric,
@@ -1136,7 +1149,7 @@ def run_dspy_gepa(
 
 
 def run_dspy_native_gepa(
-    seed_candidate: str,
+    seed_candidate: str | dict[str, str],
     train_set: list[dict],
     val_set: list[dict],
     objective: str,
@@ -1152,6 +1165,10 @@ def run_dspy_native_gepa(
     """
     import dspy
     from dspy import GEPA
+
+    # Normalize dict seed_candidate to str (DSPy only supports string-based skill content)
+    if isinstance(seed_candidate, dict):
+        seed_candidate = next(iter(seed_candidate.values()))
 
     # Guard: temperature is incompatible with extended thinking per llm_config.py.
     # The dspy.LM constructor below passes temperature=0.7 (task) and temperature=1.0
@@ -1178,7 +1195,6 @@ def run_dspy_native_gepa(
     # Configure DSPy LMs
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
     reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
-    dspy.configure(lm=task_lm_obj)
 
     # DSPy Signature: given task + context, produce high-quality response
     # (Duplicated from run_dspy_gepa for self-containment; dspy.GEPA uses the same
@@ -1237,9 +1253,7 @@ def run_dspy_native_gepa(
 
     # Metric: dspy 3.x GEPAFeedbackMetric signature — returns dspy.Prediction so the
     # reflection LM can iterate on failure modes via the feedback field.
-    def metric(
-        gold, pred, trace=None, pred_name=None, pred_trace=None
-    ) -> dspy.Prediction:
+    def metric(gold, pred, trace=None, pred_name=None, pred_trace=None) -> dspy.Prediction:
         for ep in train_set + val_set:
             if ep.get("task_prompt", "")[:100] == gold.task_prompt[:100]:
                 from evaluator import score_episode
@@ -1247,11 +1261,11 @@ def run_dspy_native_gepa(
                 score, side_info = score_episode(ep)
                 feedback = side_info.get("feedback", "")
                 return dspy.Prediction(score=score, feedback=feedback)
-        return dspy.Prediction(
-            score=0.5, feedback="No matching episode found for gold example."
-        )
+        return dspy.Prediction(score=0.5, feedback="No matching episode found for gold example.")
 
     program = SkillProgram(seed_candidate)
+    # dspy 3.0: per-module LM injection (replaces legacy dspy.configure global config)
+    program.set_lm(task_lm_obj)
 
     optimizer = GEPA(
         metric=metric,
@@ -1289,9 +1303,7 @@ def run_dspy_native_gepa(
     try:
         optimized.save(str(output_dir / "dspy_program.json"))
     except Exception as exc:
-        logger.warning(
-            "[run_dspy_native_gepa] DSPy stage-1 initialization failed: %s", exc
-        )
+        logger.warning("[run_dspy_native_gepa] DSPy stage-1 initialization failed: %s", exc)
     print(f"[dspy.GEPA] Saved to {output_dir}/best_candidate_dspy.md")
     return best_skill
 
@@ -1366,7 +1378,9 @@ def run_gepa_synthetic(
                 cache_evaluation=True,
                 parallel=True,  # Synthetic evaluator is stateless → parallelise metric evaluation across tasks.
                 max_workers=GEPA_NUM_THREADS_DEFAULT,
-                frontier_type=frontier_type,
+                frontier_type=cast(
+                    Literal["instance", "objective", "hybrid", "cartesian"], frontier_type
+                ),
             ),
             reflection=ReflectionConfig(
                 reflection_lm=reflection_lm,
@@ -1594,24 +1608,24 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Use gepa's frontier_type='hybrid' (multi-objective Pareto). Requires the new "
-             "'scores' dict in side_info added in task 9.2; without those keys gepa 0.1.1 raises "
-             "ValueError. Default: False (uses 'instance' frontier).",
+        "'scores' dict in side_info added in task 9.2; without those keys gepa 0.1.1 raises "
+        "ValueError. Default: False (uses 'instance' frontier).",
     )
     ap.add_argument(
         "--time-split",
         action="store_true",
         default=False,
         help="Sort episodes chronologically by timestamp before train/val split "
-             "(avoids data leakage per the Arize Prompt Learning paper). "
-             "Default: False (random split).",
+        "(avoids data leakage per the Arize Prompt Learning paper). "
+        "Default: False (random split).",
     )
     ap.add_argument(
         "--proposer",
         choices=["batch", "loop"],
         default="batch",
         help="Reflection proposer strategy. 'loop' (gskill-style) processes one episode "
-             "per reflection call, producing more detailed skills at higher API cost. "
-             "'batch' (default) sends all evaluation results at once.",
+        "per reflection call, producing more detailed skills at higher API cost. "
+        "'batch' (default) sends all evaluation results at once.",
     )
 
     # Output
@@ -1624,8 +1638,10 @@ def main() -> None:
         _gepa_frontier_type = "hybrid"
         # Hybrid requires side_info["scores"] from make_replay_evaluator.
         # task 9.2 added this to score_episode side_info.
-        print("[main] --hybrid-frontier enabled: requires side_info['scores'] from make_replay_evaluator. "
-              "If you wrote a custom evaluator, ensure it returns a 'scores' dict.")
+        print(
+            "[main] --hybrid-frontier enabled: requires side_info['scores'] from make_replay_evaluator. "
+            "If you wrote a custom evaluator, ensure it returns a 'scores' dict."
+        )
         _gepa_default_max_evals = 100
     elif args.phase == 1:
         _gepa_frontier_type = "instance"
@@ -1742,6 +1758,9 @@ def main() -> None:
             )
         else:
             task_library = load_task_library(args.domain)
+
+        # Normalize to list[dict] — generate_tasks_for_domain may return dict | list[dict]
+        task_library = list(task_library) if isinstance(task_library, dict) else task_library
 
         if not task_library:
             print("[main] ERROR: No tasks available. Use --domain or --domain-description.")

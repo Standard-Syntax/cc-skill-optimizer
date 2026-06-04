@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Extraction tests patch both `RealDSPy.MIPROv2` and `RealDSPy.teleprompt.MIPROv2`
   - 72/74 total tests pass (2 pre-existing failures in test_optimize_fixes.py from defunct gepa.optimize_anything mock)
 
+- **Phase 14: Per-module LM injection** (2026-06-04)
+  - Migrated `dspy.configure(lm=...)` → `Program.set_lm(task_lm_obj)` per-module LM injection
+  - Updated test mocks for dspy 3.0 Module.set_lm and Module.map_named_predictors API
+  - 81/81 tests pass
+
 - **Phase 11: DSPy 3.0 upgrade + dspy.GEPA native backend** (2026-06-03)
   - Upgraded from dspy 2.x to dspy>=3.0.0,<4.0.0 (dspy 3.0+ required)
   - litellm>=1.64.0 is now required (dspy 3.x hard-requires this version)
@@ -37,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New `--proposer {batch,loop}` CLI flag (default batch): selects gepa 0.1.1 reflection proposer
   - `sort_by_time` parameter in `build_corpus()` for chronological episode ordering
   - Added `pyyaml>=6.0` dependency
+  - New test coverage: `test_bash_command_sequence_included`, `test_files_written_pattern_included`, `test_distinct_error_count_included` in `tests/test_evaluator_fixes.py`
 
 - **Phase 9: Multi-objective Pareto frontier** (2026-06-03)
   - New `scores` dict in evaluator `side_info` with 4 normalized keys: outcome, efficiency, cache_efficiency, low_error_rate

@@ -392,6 +392,58 @@ class TestFeedbackSynthesisEvaluator:
         assert fb  # non-empty
         assert "errors" not in fb.lower()  # no error mentioned
 
+    def test_bash_command_sequence_included(self):
+        episode = {
+            "outcome": "error",
+            "bash_commands": ["ls -la", "cat foo.txt", "grep X", "pytest"],
+        }
+        side_info = {
+            "n_tool_calls": 5,
+            "compaction": False,
+            "error_messages": ["EACCES"],
+        }
+        fb = ev._build_feedback(episode, side_info)
+        assert "Commands run:" in fb
+        assert "ls -la" in fb
+        assert "pytest" in fb
+
+    def test_files_written_pattern_included(self):
+        episode = {
+            "outcome": "error",
+            "files_written": ["/path/to/a.py", "/path/to/b.py", "/path/to/c.py"],
+        }
+        side_info = {
+            "n_tool_calls": 3,
+            "compaction": False,
+            "error_messages": ["FileNotFound"],
+        }
+        fb = ev._build_feedback(episode, side_info)
+        assert "Files touched:" in fb
+        assert "/path/to/a.py" in fb
+
+    def test_distinct_error_count_included(self):
+        # n_errors > 1 → distinct error count should appear
+        episode = {"outcome": "error"}
+        side_info = {
+            "n_tool_calls": 4,
+            "compaction": False,
+            "error_messages": ["E1", "E2", "E3"],
+            "n_errors": 3,
+        }
+        fb = ev._build_feedback(episode, side_info)
+        assert "3 distinct errors encountered" in fb
+
+        # n_errors == 1 → distinct error count should NOT appear (threshold is > 1)
+        episode2 = {"outcome": "error"}
+        side_info2 = {
+            "n_tool_calls": 4,
+            "compaction": False,
+            "error_messages": ["only one"],
+            "n_errors": 1,
+        }
+        fb2 = ev._build_feedback(episode2, side_info2)
+        assert "distinct errors" not in fb2.lower()
+
 
 # =======================================================================
 # YAML validation gate (--target agent)

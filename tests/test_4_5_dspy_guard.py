@@ -39,6 +39,9 @@ def mock_dspy_modules():
     top-level form (canonical 3.x), so the dspy.X mocks are the
     critical ones; the dspy.teleprompt.X mocks are kept for
     backward compat with any remaining legacy call sites.
+
+    Also mocks the dspy 3.0 Module API (set_lm, map_named_predictors)
+    used for per-module LM injection in Phase 14.
     """
     mock_dspy = MagicMock()
     mock_teleprompt = MagicMock()
@@ -51,6 +54,10 @@ def mock_dspy_modules():
     mock_dspy.Signature = MagicMock()
     mock_dspy.Predict = MagicMock()
     mock_dspy.InputField = MagicMock()
+
+    # dspy 3.0 Module API (Phase 14)
+    mock_dspy.Module.set_lm = MagicMock()
+    mock_dspy.Module.map_named_predictors = MagicMock()
     mock_dspy.OutputField = MagicMock()
     mock_dspy.Example = MagicMock()
     mock_dspy.Prediction = MagicMock()
@@ -437,3 +444,79 @@ class TestEdgeCases:
         # These shouldn't match because they don't START with the prefix
         assert _model_uses_thinking("minimax/some-other-model") is False
         assert _model_uses_thinking("anthropic-minimax") is False
+
+
+# ============================================================================
+# Phase 14: verify mock surface includes dspy 3.0 Module API mocks
+# ============================================================================
+
+
+class TestDspyMockSurfacePhase14:
+    """Verify mock_dspy_modules() factory exposes dspy 3.0 Module API for Phase 14."""
+
+    def test_mock_dspy_modules_includes_set_lm(self):
+        """mock_dspy_modules() should return a context where Module.set_lm is a MagicMock."""
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            ctx = mock_dspy_modules()
+            mocks = stack.enter_context(ctx)
+            set_lm_mock = mocks["dspy"].Module.set_lm
+        # After exiting the context, verify the mock was callable
+        assert callable(set_lm_mock), "Module.set_lm should be a MagicMock (callable)"
+
+    def test_mock_dspy_modules_includes_map_named_predictors(self):
+        """mock_dspy_modules() should return a context where Module.map_named_predictors is a MagicMock."""
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            ctx = mock_dspy_modules()
+            mocks = stack.enter_context(ctx)
+            mnp_mock = mocks["dspy"].Module.map_named_predictors
+        # After exiting the context, verify the mock was callable
+        assert callable(mnp_mock), "Module.map_named_predictors should be a MagicMock (callable)"
+
+    def test_source_run_dspy_gepa_uses_set_lm(self):
+        """run_dspy_gepa source should use program.set_lm and NOT call dspy.configure(lm=...)."""
+        import re
+
+        import optimize
+
+        src = inspect.getsource(optimize.run_dspy_gepa)
+        assert "program.set_lm" in src, (
+            "run_dspy_gepa must use program.set_lm() for per-module LM injection"
+        )
+        assert not re.search(r"dspy\.configure\s*\(", src), (
+            "run_dspy_gepa must not call legacy dspy.configure(lm=...) global config"
+        )
+
+    def test_source_run_dspy_native_gepa_uses_set_lm(self):
+        """run_dspy_native_gepa source should use program.set_lm and NOT call dspy.configure(lm=...)."""
+        import re
+
+        import optimize
+
+        src = inspect.getsource(optimize.run_dspy_native_gepa)
+        assert "program.set_lm" in src, (
+            "run_dspy_native_gepa must use program.set_lm() for per-module LM injection"
+        )
+        assert not re.search(r"dspy\.configure\s*\(", src), (
+            "run_dspy_native_gepa must not call legacy dspy.configure(lm=...) global config"
+        )
+
+    def test_source_make_dspy_synthetic_pipeline_uses_map_named_predictors(self):
+        """make_dspy_synthetic_pipeline should use map_named_predictors and lambda p: p.set_lm."""
+        import re
+
+        from src import synthetic_evaluator
+
+        src = inspect.getsource(synthetic_evaluator.make_dspy_synthetic_pipeline)
+        assert "map_named_predictors" in src, (
+            "make_dspy_synthetic_pipeline must use map_named_predictors"
+        )
+        assert "lambda p: p.set_lm" in src, (
+            "make_dspy_synthetic_pipeline must use lambda p: p.set_lm pattern"
+        )
+        assert not re.search(r"dspy\.configure\s*\(", src), (
+            "make_dspy_synthetic_pipeline must not call legacy dspy.configure(lm=...)"
+        )

@@ -29,8 +29,11 @@ class TestCacheBonusRemoved:
 
     def test_cache_bonus_not_importable(self):
         """Attempt import of _cache_bonus should raise ImportError."""
-        with pytest.raises(ImportError):
-            from evaluator import _cache_bonus  # noqa: F401
+        with pytest.raises((ImportError, AttributeError)):
+            # Bypass ty's static import analysis - this import is INTENTIONALLY expected to fail
+            import evaluator
+
+            _ = evaluator._cache_bonus  # noqa: B009  # type: ignore
 
 
 class TestComputeCacheRatio:

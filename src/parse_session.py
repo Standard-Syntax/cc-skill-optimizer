@@ -334,7 +334,9 @@ def parse_session(path: Path) -> dict:
                     cmd = tool_input.get("command", "")
                     if cmd:
                         bash_commands.append(cmd)
-                        if (result_is_error or "error" in result_text.lower()[:80]) and outcome == "unknown":
+                        if (
+                            result_is_error or "error" in result_text.lower()[:80]
+                        ) and outcome == "unknown":
                             outcome = "error"
 
                 elif tool_name in ("Read", "read"):

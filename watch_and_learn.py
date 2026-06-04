@@ -169,12 +169,12 @@ def watch_and_learn(
 
 def _run_optimization(
     corpus: list[dict],
-    current_skill: str,
+    current_skill: str | dict[str, str],
     skill_file: Path,
     reflection_lm: str,
     max_evals: int,
     max_backups: int = 5,
-) -> str:
+) -> str | dict[str, str]:
     import random
 
     from evaluator import make_replay_evaluator
@@ -239,8 +239,10 @@ def _run_optimization(
     )
     for old_backup in backups[max_backups:]:
         old_backup.unlink(missing_ok=True)
-    skill_file.write_text(best, encoding="utf-8")
-    print(f"[watch] Backed up to {backup.name}, wrote new skill ({result.best_score:.3f})")
+    if isinstance(best, str):
+        skill_file.write_text(best, encoding="utf-8")
+    best_score = result.val_aggregate_scores[result.best_idx]
+    print(f"[watch] Backed up to {backup.name}, wrote new skill ({best_score:.3f})")
     return best
 
 

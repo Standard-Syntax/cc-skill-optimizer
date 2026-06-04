@@ -29,7 +29,7 @@ def clean_env_vars() -> dict:
     }
 
 
-def run_python(code: str, extra_env: dict = None) -> subprocess.CompletedProcess:
+def run_python(code: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
     """Run Python code in a guaranteed clean subprocess."""
     env = clean_env_vars()
     if extra_env:
@@ -209,7 +209,11 @@ class TestLintAndFormat:
             text=True,
         )
         # Only care about real errors, not warnings
-        if result.returncode != 0 and "error" in result.stdout.lower() and "UP024" not in result.stdout:
+        if (
+            result.returncode != 0
+            and "error" in result.stdout.lower()
+            and "UP024" not in result.stdout
+        ):
             # Check if it's just the OSError alias preference
             pytest.fail(f"Lint errors: {result.stdout}")
 

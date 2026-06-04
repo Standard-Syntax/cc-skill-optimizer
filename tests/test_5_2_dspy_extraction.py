@@ -37,7 +37,7 @@ class DummyAssess:
     def __init__(
         self,
         instructions: str = "Test instructions",
-        demos: list = None,
+        demos: list | None = None,
     ):
         self.signature = self
         self.instructions = instructions
@@ -119,8 +119,8 @@ def run_with_mock_monkeypatch(monkeypatch, mock_program, task_lib, seed, out_dir
     monkeypatch.setattr(RealDSPy, "LM", mock.MagicMock())
     monkeypatch.setattr(RealDSPy, "MIPROv2", mock.MagicMock())  # dspy 3.x top-level
     monkeypatch.setattr(RealDSPy.teleprompt, "MIPROv2", mock.MagicMock())  # legacy
-    RealDSPy.MIPROv2.return_value.compile = mock_compile_fn
-    RealDSPy.teleprompt.MIPROv2.return_value.compile = mock_compile_fn
+    RealDSPy.MIPROv2.return_value.compile = mock_compile_fn  # type: ignore
+    RealDSPy.teleprompt.MIPROv2.return_value.compile = mock_compile_fn  # type: ignore
 
     from synthetic_evaluator import make_dspy_synthetic_pipeline
 
@@ -191,8 +191,8 @@ def test_extraction_falls_back_when_signature_missing(
     monkeypatch.setattr(RealDSPy, "LM", mock.MagicMock())
     monkeypatch.setattr(RealDSPy, "MIPROv2", mock.MagicMock())  # dspy 3.x top-level
     monkeypatch.setattr(RealDSPy.teleprompt, "MIPROv2", mock.MagicMock())  # legacy
-    RealDSPy.MIPROv2.return_value.compile = mock_compile_fn
-    RealDSPy.teleprompt.MIPROv2.return_value.compile = mock_compile_fn
+    RealDSPy.MIPROv2.return_value.compile = mock_compile_fn  # type: ignore
+    RealDSPy.teleprompt.MIPROv2.return_value.compile = mock_compile_fn  # type: ignore
 
     from synthetic_evaluator import make_dspy_synthetic_pipeline
 

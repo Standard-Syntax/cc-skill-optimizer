@@ -79,7 +79,7 @@ except ImportError:
     EXTRA_BODY = {}
     EVAL_MAX_TOKENS = 512
     THINKING_CONFIG_EVAL = {"type": "disabled"}
-    DIRECT_OUTPUT_PREFIX = "Respond directly and concisely. Output only what is requested."
+    DIRECT_OUTPUT_PREFIX = "Respond directly and concisely. Output only what is explicitly requested. Do not restate the task or add unsolicited commentary."
 
 from utils import _parse_llm_json
 
@@ -107,7 +107,7 @@ except ImportError:
 
             return _NoOpCtx()
 
-    oa = _NoOpOa()
+    oa = _NoOpOa()  # type: ignore
 
 # ---------------------------------------------------------------------------
 # Built-in task libraries
@@ -521,12 +521,12 @@ def generate_tasks_for_domain(
     domain_description: str,
     judge_lm: str = DEFAULT_MODEL,
     n: int = 12,
-) -> list[dict]:
+) -> dict | list[dict]:
     """
     Use an LLM to generate n task descriptions for a domain you describe.
     Returns a list of task dicts in the same schema as the built-in libraries.
     """
-    import litellm  # type: ignore
+    import litellm
 
     prompt = (
         f"Domain: {domain}\n"
@@ -695,7 +695,7 @@ def judge_score_task_m2_7(
     - Rewards multiple solution approaches
     - Penalizes verbose skills (>150 words unless essential)
     """
-    import litellm  # type: ignore
+    import litellm
 
     # Import M2.7-specific token budget
     try:
@@ -727,6 +727,11 @@ def judge_score_task_m2_7(
         )
         raw = resp.choices[0].message.content or "{}"
         data = _parse_llm_json(raw, {})
+        if not isinstance(data, dict):
+            return 0.5, {
+                "error": "Unexpected response format",
+                "task": task.get("task_description", "")[:100],
+            }
         return float(data.get("score", 0.5)), {
             "judge_score": float(data.get("score", 0.5)),
             "reasoning": data.get("reasoning", ""),
@@ -749,7 +754,7 @@ def judge_score_task(
 
     M2.7 tuning: explicit JSON contract, max_tokens cap, official inference params.
     """
-    import litellm  # type: ignore
+    import litellm
 
     pitfalls = "\n".join(f"- {p}" for p in task.get("pitfalls", []))
     criteria = "\n".join(f"- {c}" for c in task.get("success_criteria", []))
@@ -775,6 +780,11 @@ def judge_score_task(
         )
         raw = resp.choices[0].message.content or "{}"
         data = _parse_llm_json(raw, {})
+        if not isinstance(data, dict):
+            return 0.5, {
+                "error": "Unexpected response format",
+                "task": task.get("task_description", "")[:100],
+            }
         return float(data.get("score", 0.5)), {
             "judge_score": float(data.get("score", 0.5)),
             "reasoning": data.get("reasoning", ""),
@@ -937,7 +947,7 @@ def make_synthetic_evaluator(
 
 def make_dspy_synthetic_pipeline(
     task_library: list[dict],
-    seed_candidate: str,
+    seed_candidate: str | dict[str, str],
     task_lm: str = "anthropic/claude-haiku-4-5-20251001",
     reflection_lm: str = "anthropic/claude-haiku-4-5-20251001",
     max_bootstrap_evals: int = 30,
@@ -960,12 +970,15 @@ def make_dspy_synthetic_pipeline(
     Returns the best skill string found.
     """
 
+    # Normalize dict seed_candidate to str (DSPy only supports string-based skill content)
+    if isinstance(seed_candidate, dict):
+        seed_candidate = next(iter(seed_candidate.values()))
+
     import dspy
     from dspy import MIPROv2
 
     task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
     reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
-    dspy.configure(lm=task_lm_obj)
 
     # ------------------------------------------------------------------ #
     # DSPy Signature
@@ -1082,6 +1095,8 @@ def make_dspy_synthetic_pipeline(
     print(f"  train={len(dspy_train)} val={len(dspy_val)} task_lm={task_lm}\n")
 
     program = SkillEvaluator()
+    # dspy 3.0: per-module LM injection via map_named_predictors (replaces legacy global-config LM pattern)
+    program.map_named_predictors(lambda p: p.set_lm(task_lm_obj))
     bootstrap = dspy.BootstrapFewShot(
         metric=metric,
         max_bootstrapped_demos=3,
@@ -1126,7 +1141,11 @@ def make_dspy_synthetic_pipeline(
     optimized_instructions: str | None = None
     optimized_demos: list = []
     try:
-        optimized_instructions = optimized.assess.signature.instructions
+        optimized_instructions = (
+            optimized.assess.signature.instructions
+            if optimized.assess.signature is not None
+            else None
+        )
     except AttributeError:
         print(
             "[dspy-synthetic] WARN: could not extract optimized instructions — DSPy API may have changed"

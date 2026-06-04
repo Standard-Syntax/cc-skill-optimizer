@@ -276,8 +276,10 @@ def test_skip_paths_filtered_before_parse_session_called(tmp_session_dir):
         called_paths.append(str(path))
         return original_parse(path)
 
-    with patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir), \
-         patch("parse_session.parse_session", side_effect=track_parse):
+    with (
+        patch("parse_session.DEFAULT_CLAUDE_DIR", tmp_session_dir),
+        patch("parse_session.parse_session", side_effect=track_parse),
+    ):
         build_corpus(claude_dir=tmp_session_dir, skip_paths={file_to_skip})
 
     assert file_to_skip not in called_paths, (

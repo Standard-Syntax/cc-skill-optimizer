@@ -36,9 +36,11 @@ class LogCapture:
             self.logs.append(str(args[0]))
 
     def get_log_context(self):
+        captured_logs = self.logs
+
         class _Ctx:
             def drain(self) -> str:
-                return "\n".join(self.logs)
+                return "\n".join(captured_logs)
 
         return _Ctx()
 
@@ -90,7 +92,7 @@ def test_error_truncation():
 
     # Replace oa module globally
     old_oa = synthetic_evaluator.oa
-    synthetic_evaluator.oa = capture
+    synthetic_evaluator.oa = capture  # type: ignore
 
     tasks = [{"task_description": "Test task", "pitfalls": [], "success_criteria": []}]
     evaluate = synthetic_evaluator.make_synthetic_evaluator(tasks, use_judge=False)
@@ -123,7 +125,7 @@ def test_tool_calls_limit():
     capture = LogCapture()
 
     old_oa = synthetic_evaluator.oa
-    synthetic_evaluator.oa = capture
+    synthetic_evaluator.oa = capture  # type: ignore
 
     tasks = [{"task_description": "Test task", "pitfalls": [], "success_criteria": []}]
     evaluate = synthetic_evaluator.make_synthetic_evaluator(tasks, use_judge=False)
@@ -162,7 +164,7 @@ def test_judge_score_logged():
     capture = LogCapture()
 
     old_oa = synthetic_evaluator.oa
-    synthetic_evaluator.oa = capture
+    synthetic_evaluator.oa = capture  # type: ignore
 
     tasks = [{"task_description": "Test task", "pitfalls": [], "success_criteria": []}]
     evaluate = synthetic_evaluator.make_synthetic_evaluator(tasks, use_judge=True)
@@ -193,7 +195,7 @@ def test_compaction_log():
     capture = LogCapture()
 
     old_oa = synthetic_evaluator.oa
-    synthetic_evaluator.oa = capture
+    synthetic_evaluator.oa = capture  # type: ignore
 
     tasks = [{"task_description": "Test task", "pitfalls": [], "success_criteria": []}]
     evaluate = synthetic_evaluator.make_synthetic_evaluator(tasks, use_judge=False)

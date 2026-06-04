@@ -36,6 +36,9 @@ def mock_dspy_modules():
     dspy 3.x exposes optimizers at both top-level (dspy.GEPA, dspy.MIPROv2) and
     via the legacy dspy.teleprompt submodule. We mock BOTH paths so that both
     `from dspy import X` and `from dspy.teleprompt import X` are intercepted.
+
+    Also mocks the dspy 3.0 Module API (set_lm, map_named_predictors) used
+    for per-module LM injection in Phase 14.
     """
     mock_dspy = MagicMock()
     mock_teleprompt = MagicMock()
@@ -59,6 +62,10 @@ def mock_dspy_modules():
     # Legacy: dspy.teleprompt (backward compat)
     mock_teleprompt.GEPA = MagicMock()
     mock_teleprompt.MIPROv2 = MagicMock()
+
+    # dspy 3.0 Module API (Phase 14): per-module LM injection
+    mock_dspy.Module.set_lm = MagicMock()
+    mock_dspy.Module.map_named_predictors = MagicMock()
 
     mocks = {
         "dspy": mock_dspy,
@@ -88,9 +95,7 @@ class TestDspyBackendCLI:
         # Verify the --dspy-backend argument has native-gepa as a choice
         assert 'choices=["mipro", "native-gepa"]' in src or (
             "'native-gepa'" in src and "--dspy-backend" in src
-        ), (
-            "--dspy-backend should accept 'native-gepa' as a valid choice"
-        )
+        ), "--dspy-backend should accept 'native-gepa' as a valid choice"
 
     def test_dspy_backend_mipro_is_accepted(self):
         """--dspy-backend mipro should parse without argparse error."""
@@ -231,8 +236,7 @@ class TestRunDspyNativeGepaMetric:
         for ret in return_statements:
             stripped = ret.strip()
             assert "dspy.Prediction" in stripped, (
-                f"All return statements in metric should return dspy.Prediction. "
-                f"Found: {stripped}"
+                f"All return statements in metric should return dspy.Prediction. Found: {stripped}"
             )
 
 
@@ -276,8 +280,7 @@ class TestSideInfoScoresPassedToGEPA:
         # in side_info and accessible via the same side_info object that
         # score_episode returns.
         assert "score, side_info" in src, (
-            "score_episode should be called and its side_info unpacked for "
-            "use in dspy.Prediction"
+            "score_episode should be called and its side_info unpacked for use in dspy.Prediction"
         )
 
     def test_score_episode_return_tuple_in_source(self):
@@ -288,9 +291,7 @@ class TestSideInfoScoresPassedToGEPA:
 
         # The metric unpacks score, side_info = score_episode(ep)
         # This is how the scores dict reaches the GEPA reflection step
-        assert re.search(
-            r"score\s*,\s*side_info\s*=\s*score_episode", src
-        ), (
+        assert re.search(r"score\s*,\s*side_info\s*=\s*score_episode", src), (
             "Metric should unpack score, side_info = score_episode(ep) "
             "so that side_info (containing the scores dict) is available "
             "for dspy.Prediction feedback"
@@ -325,6 +326,43 @@ class TestNativeGepaCLIIntegration:
         src = inspect.getsource(optimize)
 
         # The else branch (when dspy_backend != "native-gepa") should call run_dspy_gepa
-        assert "run_dspy_gepa" in src, (
-            "Default (mipro) backend should call run_dspy_gepa"
+        assert "run_dspy_gepa" in src, "Default (mipro) backend should call run_dspy_gepa"
+
+    def test_run_dspy_gepa_uses_program_set_lm(self):
+        """Verify run_dspy_gepa and run_dspy_native_gepa use program.set_lm (not dspy.configure global)."""
+        import re
+
+        import optimize
+
+        # Check both functions use the new per-module LM injection
+        for fn_name in ("run_dspy_gepa", "run_dspy_native_gepa"):
+            src = inspect.getsource(getattr(optimize, fn_name))
+            # Must use program.set_lm
+            assert "program.set_lm" in src, (
+                f"{fn_name} must use program.set_lm() for per-module LM injection"
+            )
+            # Must NOT use dspy.configure(lm=...) function call (the bare string "dspy.configure"
+            # is allowed in comments for migration context)
+            assert not re.search(r"dspy\.configure\s*\(", src), (
+                f"{fn_name} must not call legacy dspy.configure(lm=...) global config"
+            )
+
+    def test_make_dspy_synthetic_pipeline_uses_map_named_predictors(self):
+        """Verify make_dspy_synthetic_pipeline uses map_named_predictors for LM injection."""
+        import re
+
+        from src import synthetic_evaluator
+
+        src = inspect.getsource(synthetic_evaluator.make_dspy_synthetic_pipeline)
+        # Must use the dspy 3.0 idiomatic pattern
+        assert "map_named_predictors" in src, (
+            "make_dspy_synthetic_pipeline must use map_named_predictors"
+        )
+        assert "lambda p: p.set_lm" in src, (
+            "make_dspy_synthetic_pipeline must use the lambda set_lm pattern"
+        )
+        # Must NOT use dspy.configure(lm=...) function call (the bare string "dspy.configure"
+        # is allowed in comments for migration context)
+        assert not re.search(r"dspy\.configure\s*\(", src), (
+            "make_dspy_synthetic_pipeline must not call legacy dspy.configure(lm=...)"
         )

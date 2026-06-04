@@ -120,9 +120,12 @@ def test_max_evals_override_passes_through_to_run_gepa_optimize_anything():
         captured_kwargs.update(kwargs)
         return {}
 
-    with mock.patch.object(
-        opt_module, "run_gepa_optimize_anything", mock_run_gepa_optimize_anything
-    ), mock.patch.object(opt_module, "run_gepa_synthetic", mock_run_gepa_synthetic):
+    with (
+        mock.patch.object(
+            opt_module, "run_gepa_optimize_anything", mock_run_gepa_optimize_anything
+        ),
+        mock.patch.object(opt_module, "run_gepa_synthetic", mock_run_gepa_synthetic),
+    ):
         # Build args manually to simulate what main() does
         ap = argparse.ArgumentParser()
         ap.add_argument("--target", default="skill")

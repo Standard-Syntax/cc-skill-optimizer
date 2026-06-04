@@ -414,7 +414,7 @@ def test_old_bug_would_have_crashed():
 
     # This demonstrates the crash
     with pytest.raises(TypeError):
-        max(10, args_max_evals // 4)  # TypeError!
+        max(10, args_max_evals // 4)  # type: ignore  # TypeError!
 
     # The FIX handles this:
     effective = compute_effective_max_evals(args_max_evals, phase=1)

@@ -68,7 +68,7 @@ except ImportError:
     EXTRA_BODY = {}
     EVAL_MAX_TOKENS = 512
     THINKING_CONFIG_EVAL = {"type": "disabled"}
-    DIRECT_OUTPUT_PREFIX = "Respond directly and concisely. Output only what is requested."
+    DIRECT_OUTPUT_PREFIX = "Respond directly and concisely. Output only what is explicitly requested. Do not restate the task or add unsolicited commentary."
 
 # ---------------------------------------------------------------------------
 # Scoring utilities
@@ -258,7 +258,7 @@ def llm_judge_score(
     no tool use, no multi-turn history.  Thinking blocks not needed here.
     temperature and top_k intentionally omitted (incompatible with thinking).
     """
-    import litellm  # type: ignore
+    import litellm
 
     from parse_session import episode_to_asi
 
@@ -285,6 +285,8 @@ def llm_judge_score(
         )
         raw = resp.choices[0].message.content or "{}"
         data = _parse_llm_json(raw, {})
+        if not isinstance(data, dict):
+            return 0.5, ""
         return float(data.get("score", 0.5)), data.get("reasoning", "")
     except Exception as exc:
         return 0.5, f"judge_error: {exc}"
@@ -312,7 +314,7 @@ def _check_yaml_validity(candidate: str) -> tuple[bool, str | None]:
         try:
             yaml.safe_load(block)
         except yaml.YAMLError as e:
-            return False, f"YAML block {i+1} failed to parse: {e}"
+            return False, f"YAML block {i + 1} failed to parse: {e}"
     return True, None
 
 

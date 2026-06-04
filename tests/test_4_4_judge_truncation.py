@@ -7,6 +7,7 @@ Tests llm_judge_score() function in src/evaluator.py.
 
 import json
 import sys
+from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,16 +46,16 @@ def make_skill(length: int) -> str:
     return result[:length]
 
 
-mock_litellm_instance = None
+mock_litellm_instance: MagicMock | None = None
 
 
 @pytest.fixture(autouse=True)
-def setup_litellm_mock():
+def setup_litellm_mock() -> Iterator[MagicMock]:
     """Setup litellm mock once for all tests in session."""
     global mock_litellm_instance
     mock_litellm_instance = MagicMock()
     sys.modules["litellm"] = mock_litellm_instance
-    yield
+    yield mock_litellm_instance
     # Cleanup
     if "litellm" in sys.modules:
         del sys.modules["litellm"]
@@ -78,6 +79,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = json.dumps({"score": 0.8, "reasoning": "Good"})
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         # Call the function
@@ -112,6 +114,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = json.dumps({"score": 0.9, "reasoning": "Great"})
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score(skill_8000, SAMPLE_EPISODE, "test/model")
@@ -138,6 +141,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = json.dumps({"score": 0.7, "reasoning": "Okay"})
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score(skill_12000, SAMPLE_EPISODE, "test/model")
@@ -165,6 +169,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = json.dumps({"score": 0.6, "reasoning": "Fair"})
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score(skill_50000, SAMPLE_EPISODE, "test/model")
@@ -195,6 +200,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = json.dumps({"score": 0.8, "reasoning": "OK"})
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score("short skill", SAMPLE_EPISODE, "test/model")
@@ -230,6 +236,7 @@ class TestJudgeSkillTruncation:
                 "reasoning": expected_reasoning,
             }
         )
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score("test skill", SAMPLE_EPISODE, "test/model")
@@ -252,6 +259,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = "INVALID JSON {{{"
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score("test skill", SAMPLE_EPISODE, "test/model")
@@ -276,6 +284,7 @@ class TestJudgeSkillTruncation:
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = json.dumps({"score": 0.9, "reasoning": "Fine"})
+        assert mock_litellm_instance is not None
         mock_litellm_instance.completion = MagicMock(return_value=mock_resp)
 
         score, reasoning = llm_judge_score("skill", SAMPLE_EPISODE, expected_model)
