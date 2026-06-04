@@ -1262,31 +1262,24 @@ def run_dspy_native_gepa(
     if isinstance(seed_candidate, dict):
         seed_candidate = next(iter(seed_candidate.values()))
 
-    # Guard: temperature is incompatible with extended thinking per llm_config.py.
-    # The dspy.LM constructor below passes temperature=0.7 (task) and temperature=1.0
-    # (reflection). If either model is configured with extended thinking, the API call
-    # will fail at runtime. This guard fails fast with a clear error rather than
-    # crashing at the first inference request.
-    #
-    # NOTE: This guard WILL fire for the current default models
-    # (task_lm=DEFAULT_MODEL="minimax/minimax-m2.7-highspeed",
-    #  reflection_lm=REFLECTION_MODEL="minimax/minimax-m3") because both are
-    # thinking-enabled models. This is the intended safety behavior: the user must
-    # explicitly acknowledge the conflict by either disabling thinking on those models
-    # or removing the temperature kwarg from the dspy.LM calls below.
-    if _model_uses_thinking(task_lm) or _model_uses_thinking(reflection_lm):
-        raise ValueError(
-            f"DSPy runner cannot combine temperature with extended thinking. "
-            f"task_lm={task_lm!r} reflection_lm={reflection_lm!r} — at least one model "
-            f"uses extended thinking. Either disable thinking on these models, or modify "
-            f"run_dspy_native_gepa to construct dspy.LM objects WITHOUT the temperature "
-            f"kwarg when thinking is enabled. See src/llm_config.py lines 99-105 for "
-            f"the conflict."
+    # When thinking is enabled, the temperature kwarg is INCOMPATIBLE with extended
+    # thinking per src/llm_config.py lines 99-105. Adaptively construct dspy.LM:
+    # - thinking enabled  → omit temperature (API would reject it)
+    # - thinking disabled → use temperature=0.7 (task) / temperature=1.0 (reflection)
+    thinking_enabled = _model_uses_thinking(task_lm) or _model_uses_thinking(reflection_lm)
+    if thinking_enabled:
+        # Omitting temperature when thinking is enabled (per llm_config.py conflict)
+        print(
+            f"[run_dspy_native_gepa] Thinking enabled on task_lm or reflection_lm — "
+            f"omitting temperature kwarg from dspy.LM construction. "
+            f"task_lm={task_lm!r} reflection_lm={reflection_lm!r}"
         )
-
-    # Configure DSPy LMs
-    task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
-    reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
+        task_lm_obj = dspy.LM(model=task_lm, max_tokens=4096)
+        reflect_lm_obj = dspy.LM(model=reflection_lm, max_tokens=16000)
+    else:
+        # temperature=0.7 for task LM, temperature=1.0 for reflection LM
+        task_lm_obj = dspy.LM(model=task_lm, temperature=0.7, max_tokens=4096)
+        reflect_lm_obj = dspy.LM(model=reflection_lm, temperature=1.0, max_tokens=16000)
 
     dspy_train = [ep_to_example(ep) for ep in train_set if ep.get("task_prompt")]
     dspy_val = [ep_to_example(ep) for ep in val_set if ep.get("task_prompt")]
@@ -1309,7 +1302,6 @@ def run_dspy_native_gepa(
 
     optimizer = GEPA(
         metric=metric,
-        auto="medium",
         max_metric_calls=max_metric_calls,
         reflection_lm=reflect_lm_obj,
         num_threads=4,
