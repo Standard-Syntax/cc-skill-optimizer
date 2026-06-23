@@ -53,7 +53,7 @@ isinstance(Broken(), Adder)  # True — only existence checked
 hasattr(obj, 'add') and callable(getattr(obj, 'add'))
 ```
 
-**PEP 544** says: *"A protocol can be used as a second argument in isinstance() and issubclass() only if it is explicitly opt-in by @runtime_checkable decorator."*
+**PEP 544** says: _"A protocol can be used as a second argument in isinstance() and issubclass() only if it is explicitly opt-in by @runtime_checkable decorator."_
 
 ---
 
@@ -170,12 +170,12 @@ class Application:
 
 ### 5. Protocol vs ABC Decision Rule
 
-| Use Protocol when... | Use ABC when... |
-|---|---|
-| You don't own the class | You own the class |
-| Structural duck-typed interface | You need `isinstance()` checks |
-| No default implementations needed | You want to provide default method implementations |
-| Framework requires it (e.g., `Iterable`) | Framework integration requires ABC |
+| Use Protocol when...                     | Use ABC when...                                    |
+| ---------------------------------------- | -------------------------------------------------- |
+| You don't own the class                  | You own the class                                  |
+| Structural duck-typed interface          | You need `isinstance()` checks                     |
+| No default implementations needed        | You want to provide default method implementations |
+| Framework requires it (e.g., `Iterable`) | Framework integration requires ABC                 |
 
 ```python
 # Protocol — for code you don't own and don't want to modify

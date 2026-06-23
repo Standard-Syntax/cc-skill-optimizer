@@ -2,15 +2,15 @@
 
 ## GEPA 0.1.1 + DSPy 3.3.0b1 Improvements
 
-*Researched June 2026 — Sources: GEPA docs, DSPy 3.3.0b1 release notes, gskill/optimize_anything papers, Hermes Agent self-evolution, Arize prompt-learning blog*
+_Researched June 2026 — Sources: GEPA docs, DSPy 3.3.0b1 release notes, gskill/optimize_anything papers, Hermes Agent self-evolution, Arize prompt-learning blog_
 
------
+---
 
 ## Executive Summary
 
 The GEPA and DSPy ecosystems have evolved significantly since this project was built. GEPA 0.1.1 (March 2026) and DSPy 3.3.0b1 (May 2026) introduce concrete APIs that the cc-skill-optimizer currently doesn’t use: multi-objective Pareto tracking, per-predictor tool-description optimization, candidate lineage visualization, top-K Pareto selection, multi-objective `"scores"` side-info dict, evaluation caching, `frontier_type="hybrid"`, and the `gskill`/`optimize_anything` paper’s validated SI (Side Information) design patterns. Each section below maps directly to a file or function in the current codebase.
 
------
+---
 
 ## 1. GEPA 0.1.1 — New APIs and Breaking Changes
 
@@ -18,14 +18,14 @@ The GEPA and DSPy ecosystems have evolved significantly since this project was b
 
 The upstream `gepa[dspy]==0.1.1` changed result structures that the current project may not account for:
 
-|Old (pre-0.1.1)                         |New (0.1.1)                                                               |
-|----------------------------------------|--------------------------------------------------------------------------|
-|`candidates` = list of instruction dicts|`candidates` = list of compiled DSPy modules                              |
-|`best_candidate` = dict                 |`best_candidate` = compiled DSPy module                                   |
-|`val_subscores` keyed by int            |`val_subscores` = `list[dict[Any, float]]` keyed by validation instance ID|
-|`per_val_instance_best_candidates`      |now `dict[Any, set[int]]`                                                 |
-|`best_outputs_valset`                   |now `dict[Any, list[tuple[int, Prediction]]]`                             |
-|`highest_score_achieved_per_val_task`   |now a dict keyed by validation instance ID                                |
+| Old (pre-0.1.1)                          | New (0.1.1)                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------- |
+| `candidates` = list of instruction dicts | `candidates` = list of compiled DSPy modules                               |
+| `best_candidate` = dict                  | `best_candidate` = compiled DSPy module                                    |
+| `val_subscores` keyed by int             | `val_subscores` = `list[dict[Any, float]]` keyed by validation instance ID |
+| `per_val_instance_best_candidates`       | now `dict[Any, set[int]]`                                                  |
+| `best_outputs_valset`                    | now `dict[Any, list[tuple[int, Prediction]]]`                              |
+| `highest_score_achieved_per_val_task`    | now a dict keyed by validation instance ID                                 |
 
 **Action for `optimize.py`:** Audit any code that unpacks `result.candidates` or `result.detailed_results` to use the new shapes. The `run_dspy_gepa()` function likely breaks on 0.1.1 when it tries to extract instructions from candidate dicts.
 
@@ -47,7 +47,7 @@ GEPA 0.1.1 auto-generates an interactive HTML lineage tree of all explored candi
 
 **Action:** Add `--wandb` / `--mlflow` flags to `optimize.py` as a one-liner passthrough to `GEPAConfig(engine=EngineConfig(use_wandb=True))`.
 
------
+---
 
 ## 2. Multi-Objective Pareto Tracking (Missing in Current Evaluator)
 
@@ -98,14 +98,14 @@ Then set `frontier_type="hybrid"` in the `GEPAConfig` to exploit both instance-l
 
 ### 2.2 `frontier_type` Selection Guide
 
-|Scenario                                         |Recommended                   |Why                               |
-|-------------------------------------------------|------------------------------|----------------------------------|
-|Single metric, small corpus (20–50 episodes)     |`"instance"` (current default)|Per-episode specialization        |
-|Multi-objective scoring (after adding `"scores"`)|`"hybrid"`                    |Instance + objective keys together|
-|Very small corpus (<15 episodes)                 |`"objective"`                 |Avoid front explosion             |
-|Large corpus (150+ episodes)                     |`"cartesian"`                 |Maximum diversity                 |
+| Scenario                                          | Recommended                    | Why                                |
+| ------------------------------------------------- | ------------------------------ | ---------------------------------- |
+| Single metric, small corpus (20–50 episodes)      | `"instance"` (current default) | Per-episode specialization         |
+| Multi-objective scoring (after adding `"scores"`) | `"hybrid"`                     | Instance + objective keys together |
+| Very small corpus (<15 episodes)                  | `"objective"`                  | Avoid front explosion              |
+| Large corpus (150+ episodes)                      | `"cartesian"`                  | Maximum diversity                  |
 
------
+---
 
 ## 3. gskill / `optimize_anything` Paper — Validated SI Design Patterns
 
@@ -152,7 +152,7 @@ The `--proposer loop` flag is available in gskill but has no equivalent in cc-sk
 
 **Action in `optimize.py`:** Add `--proposer {batch,loop}` flag. In batch mode (current behavior), pass all episode side_info at once. In loop mode, run one episode per reflection call and use GEPA’s merge to combine the evolved candidates.
 
------
+---
 
 ## 4. DSPy 3.3.0b1 — `dspy.GEPA` and `ReActV2` Changes
 
@@ -178,7 +178,7 @@ The `acceptance_criterion="improvement_or_equal"` option (vs. default `"strict_i
 
 **Action in `optimize.py`:** Expose `--acceptance-criterion` flag; set to `"improvement_or_equal"` automatically when corpus size is below 20 episodes.
 
------
+---
 
 ## 5. Evaluator Signal Improvements
 
@@ -219,7 +219,7 @@ The current `llm_judge_score()` truncates the candidate skill to 8000 chars befo
 
 **Action in `src/evaluator.py`:** Implement `_two_pass_judge_score()` that activates when `len(candidate_skill) > 8000`.
 
------
+---
 
 ## 6. CLAUDE.md / AGENTS.md Content Improvements
 
@@ -250,7 +250,7 @@ The Claudelab guide describes CLAUDE.md “Step 0–8 workflow” patterns as be
 
 **Action in `src/section_parser.py`:** Add a `preserve_order=True` option to `merge_sections()` that reconstructs sections in the original document order even after independent evolution.
 
------
+---
 
 ## 7. Hermes Agent Self-Evolution — Applicable Patterns
 
@@ -271,29 +271,29 @@ Steps 5 and 6 are missing from the current cc-skill-optimizer. Specifically:
 
 **Action in `watch_and_learn.py`:** Add `--git-commit` flag. When set, each accepted skill update triggers `git add` + `git commit -m "gepa: skill iteration N (score: X.XX)"` on a dedicated branch. The backup rotation system remains as a fallback.
 
------
+---
 
 ## 8. Priority Implementation Roadmap
 
-|Priority|Item                                                             |Effort |Expected Gain                                                                          |
-|--------|-----------------------------------------------------------------|-------|---------------------------------------------------------------------------------------|
-|P0      |Multi-objective `"scores"` dict in evaluator                     |1–2 hrs|Better Pareto diversity; stops good-efficiency/bad-outcome candidates from being pruned|
-|P0      |GEPA 0.1.1 `DspyGEPAResult` shape compatibility                  |1 hr   |Prevents crash in `run_dspy_gepa()` on current gepa version                            |
-|P1      |`frontier_type="hybrid"` in EngineConfig                         |30 min |Exploits both instance and objective diversity                                         |
-|P1      |`--candidate-strategy` CLI flag with `top_k_pareto`              |1 hr   |Faster convergence on small corpora                                                    |
-|P1      |Richer feedback string (bash commands, file pattern, error count)|1–2 hrs|Directly improves reflection LM mutation quality                                       |
-|P1      |`cache_evaluation=True` in EngineConfig                          |30 min |30–50% API cost reduction in watch-and-learn daemon                                    |
-|P2      |`--time-split` chronological corpus split                        |1 hr   |Better generalisation signal; avoids data leakage                                      |
-|P2      |YAML validation gate for `--target agent` candidates             |1 hr   |Eliminates wasted judge calls on syntactically invalid AGENTS.md                       |
-|P2      |Loop proposer mode (`--proposer loop`)                           |2–3 hrs|More targeted per-failure reflection; matches gskill validated approach                |
-|P2      |Two-pass judge scoring for skills >8000 chars                    |2 hrs  |Eliminates truncation bias for large multi-component targets                           |
-|P3      |Reflection template placeholder update (GEPA 0.1.1)              |30 min |Removes deprecation warning / ValueError                                               |
-|P3      |`--acceptance-criterion improvement_or_equal` auto-detect        |1 hr   |Helps small corpora escape score plateaus                                              |
-|P3      |`--git-commit` rollback support in `watch_and_learn.py`          |2 hrs  |Safer continuous daemon operation                                                      |
-|P3      |Per-predictor tool description optimization for `--target agent` |3–4 hrs|Joint optimization of role + tool descriptions                                         |
-|P3      |WandB/MLflow candidate tree visualization                        |1 hr   |Free with GEPA 0.1.1; provides full optimization lineage                               |
+| Priority | Item                                                              | Effort  | Expected Gain                                                                           |
+| -------- | ----------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------- |
+| P0       | Multi-objective `"scores"` dict in evaluator                      | 1–2 hrs | Better Pareto diversity; stops good-efficiency/bad-outcome candidates from being pruned |
+| P0       | GEPA 0.1.1 `DspyGEPAResult` shape compatibility                   | 1 hr    | Prevents crash in `run_dspy_gepa()` on current gepa version                             |
+| P1       | `frontier_type="hybrid"` in EngineConfig                          | 30 min  | Exploits both instance and objective diversity                                          |
+| P1       | `--candidate-strategy` CLI flag with `top_k_pareto`               | 1 hr    | Faster convergence on small corpora                                                     |
+| P1       | Richer feedback string (bash commands, file pattern, error count) | 1–2 hrs | Directly improves reflection LM mutation quality                                        |
+| P1       | `cache_evaluation=True` in EngineConfig                           | 30 min  | 30–50% API cost reduction in watch-and-learn daemon                                     |
+| P2       | `--time-split` chronological corpus split                         | 1 hr    | Better generalisation signal; avoids data leakage                                       |
+| P2       | YAML validation gate for `--target agent` candidates              | 1 hr    | Eliminates wasted judge calls on syntactically invalid AGENTS.md                        |
+| P2       | Loop proposer mode (`--proposer loop`)                            | 2–3 hrs | More targeted per-failure reflection; matches gskill validated approach                 |
+| P2       | Two-pass judge scoring for skills >8000 chars                     | 2 hrs   | Eliminates truncation bias for large multi-component targets                            |
+| P3       | Reflection template placeholder update (GEPA 0.1.1)               | 30 min  | Removes deprecation warning / ValueError                                                |
+| P3       | `--acceptance-criterion improvement_or_equal` auto-detect         | 1 hr    | Helps small corpora escape score plateaus                                               |
+| P3       | `--git-commit` rollback support in `watch_and_learn.py`           | 2 hrs   | Safer continuous daemon operation                                                       |
+| P3       | Per-predictor tool description optimization for `--target agent`  | 3–4 hrs | Joint optimization of role + tool descriptions                                          |
+| P3       | WandB/MLflow candidate tree visualization                         | 1 hr    | Free with GEPA 0.1.1; provides full optimization lineage                                |
 
------
+---
 
 ## 9. Reflection Template Guidance (from gskill)
 
@@ -316,6 +316,6 @@ Each proposed SKILL.md update must:
 4. Be placed in the most relevant existing section, not appended as a new section.
 ```
 
------
+---
 
-*Confidence after research: 9/10 — All findings are grounded in primary sources (GEPA docs, DSPy release notes, peer-reviewed papers, or well-sourced blog posts from November 2025–June 2026). One uncertainty: GEPA 0.1.1 reflection template placeholder rename — exact new names were not shown in search results; verify in the `gepa` changelog before updating templates.*
+_Confidence after research: 9/10 — All findings are grounded in primary sources (GEPA docs, DSPy release notes, peer-reviewed papers, or well-sourced blog posts from November 2025–June 2026). One uncertainty: GEPA 0.1.1 reflection template placeholder rename — exact new names were not shown in search results; verify in the `gepa` changelog before updating templates._

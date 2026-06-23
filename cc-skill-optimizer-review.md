@@ -201,21 +201,21 @@ System-aware merge — combining instructions from two Pareto-frontier candidate
 
 ## Summary table
 
-| Module | Finding | Severity | Status |
-|--------|---------|----------|--------|
-| `synthetic_evaluator.py` | `oa.log()` never called; ASI routed through dict only | High | Open |
-| `optimize.py` | `--max-evals` CLI flag ignored; phase default always wins | High | Open |
-| `synthetic_evaluator.py` | `judge_score_task_m2_7` defined but never called | High | Open |
-| `evaluator.py` | LLM judge truncates skill at 3,000 chars (target is ~10,000) | Medium | Open |
-| `evaluator.py` | `_cache_bonus` in score formula rewards session structure, not skill quality | Medium | Open |
-| `evaluator.py` | `judge_weight` defaults inconsistent across evaluators (0.4 vs 0.65) | Medium | Open |
-| `watch_and_learn.py` | Subagent JSONL files not scanned; RPIV sessions invisible | Medium | Open |
-| `watch_and_learn.py` | mtime guard unreliable for detecting session completion | Medium | Open |
-| `synthetic_evaluator.py` | DSPy pipeline discards MIPROv2 instruction output; uses raw model outputs | Medium | Open |
-| `parse_session.py` | `build_corpus` has no skip-paths caching; re-reads all files each call | Low | Open |
-| `parse_session.py` | Completed sessions with neutral closing message score `unknown` (0.5) | Low | Open |
-| `section_parser.py` | Round-trip accumulates extra blank lines across GEPA iterations | Low | Open |
-| `section_parser.py` | `_normalize_key` produces silent collisions for punctuation-only heading differences | Low | Open |
-| `llm_config.py` | `configure()` runs as module-level side effect; mutates global env at import | Low | Open |
-| `optimize.py` | `make_nested_evaluator` fallback selects shortest file, not root-level file | Low | Open |
-| `optimize.py` | DSPy path uses `temperature` — incompatible with thinking-enabled models | Low | Open |
+| Module                   | Finding                                                                              | Severity | Status |
+| ------------------------ | ------------------------------------------------------------------------------------ | -------- | ------ |
+| `synthetic_evaluator.py` | `oa.log()` never called; ASI routed through dict only                                | High     | Open   |
+| `optimize.py`            | `--max-evals` CLI flag ignored; phase default always wins                            | High     | Open   |
+| `synthetic_evaluator.py` | `judge_score_task_m2_7` defined but never called                                     | High     | Open   |
+| `evaluator.py`           | LLM judge truncates skill at 3,000 chars (target is ~10,000)                         | Medium   | Open   |
+| `evaluator.py`           | `_cache_bonus` in score formula rewards session structure, not skill quality         | Medium   | Open   |
+| `evaluator.py`           | `judge_weight` defaults inconsistent across evaluators (0.4 vs 0.65)                 | Medium   | Open   |
+| `watch_and_learn.py`     | Subagent JSONL files not scanned; RPIV sessions invisible                            | Medium   | Open   |
+| `watch_and_learn.py`     | mtime guard unreliable for detecting session completion                              | Medium   | Open   |
+| `synthetic_evaluator.py` | DSPy pipeline discards MIPROv2 instruction output; uses raw model outputs            | Medium   | Open   |
+| `parse_session.py`       | `build_corpus` has no skip-paths caching; re-reads all files each call               | Low      | Open   |
+| `parse_session.py`       | Completed sessions with neutral closing message score `unknown` (0.5)                | Low      | Open   |
+| `section_parser.py`      | Round-trip accumulates extra blank lines across GEPA iterations                      | Low      | Open   |
+| `section_parser.py`      | `_normalize_key` produces silent collisions for punctuation-only heading differences | Low      | Open   |
+| `llm_config.py`          | `configure()` runs as module-level side effect; mutates global env at import         | Low      | Open   |
+| `optimize.py`            | `make_nested_evaluator` fallback selects shortest file, not root-level file          | Low      | Open   |
+| `optimize.py`            | DSPy path uses `temperature` — incompatible with thinking-enabled models             | Low      | Open   |

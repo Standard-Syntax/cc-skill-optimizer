@@ -1,0 +1,22 @@
+# .prettierignore
+
+# Python cache / build artifacts
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.tar.xz
+
+# opencode internals
+.opencode/
+.grepai/
+.swarm/
+
+# Backup files
+opencode.json.bak.*
+
+# Generated outputs
+outputs/
+
+# Lock files (opinionated: many teams leave these unformatted)
+uv.lock

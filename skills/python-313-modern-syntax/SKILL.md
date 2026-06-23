@@ -50,11 +50,11 @@ print(func.__type_params__[0].__name__)  # 'T'
 
 ### `__type_params__` Structure
 
-| Context | `__type_params__` contains |
-|---|---|
-| Generic class | Tuple of `TypeVar`, `ParamSpec`, or `TypeVarTuple` |
-| Generic function | Same |
-| Type alias (`type X = ...`) | Same |
+| Context                     | `__type_params__` contains                         |
+| --------------------------- | -------------------------------------------------- |
+| Generic class               | Tuple of `TypeVar`, `ParamSpec`, or `TypeVarTuple` |
+| Generic function            | Same                                               |
+| Type alias (`type X = ...`) | Same                                               |
 
 ### Lazy Evaluation of Bounds and Constraints
 
@@ -143,27 +143,27 @@ def g():
 
 These were deprecated in Python 3.11 and removed in Python 3.13:
 
-| Module | Replacement |
-|--------|-------------|
-| `aifc` | `shutil` + `wave`, or third-party `aifc` |
-| `audioop` | `ctypes`, `sounddevice`, `pyaudio` |
-| `cgi` | `wsgiref`, `fastapi`, `flask` |
-| `cgitb` | `traceback`, `logging` |
-| `chunk` | `struct`, `wave` |
-| `crypt` | `cryptography`, `passlib`, `bcrypt`, `argon2-cffi` |
-| `imghdr` | `filetype`, `puremagic`, `python-magic` |
-| `mailcap` | `mimetypes` |
-| `msilib` | `msidb`, `python-msi` |
-| `nis` | `nslcd`, system LDAP config |
-| `nntplib` | `imaplib`, `smtplib`, or custom NNTP client |
-| `ossaudiodev` | `pygame`, `sounddevice` |
-| `pipes` | `subprocess` |
-| `sndhdr` | `filetype`, `puremagic` |
-| `spwd` | `python-pam`, system PAM config |
-| `sunau` | `wave`, `aifc` |
-| `telnetlib` | `telnetlib3`, `Exscript` |
-| `uu` | `binascii` (but note `binascii` functions were also deprecated — see below) |
-| `xdrlib` | `xmlrpc.client`, `xdr` third-party libs |
+| Module        | Replacement                                                                 |
+| ------------- | --------------------------------------------------------------------------- |
+| `aifc`        | `shutil` + `wave`, or third-party `aifc`                                    |
+| `audioop`     | `ctypes`, `sounddevice`, `pyaudio`                                          |
+| `cgi`         | `wsgiref`, `fastapi`, `flask`                                               |
+| `cgitb`       | `traceback`, `logging`                                                      |
+| `chunk`       | `struct`, `wave`                                                            |
+| `crypt`       | `cryptography`, `passlib`, `bcrypt`, `argon2-cffi`                          |
+| `imghdr`      | `filetype`, `puremagic`, `python-magic`                                     |
+| `mailcap`     | `mimetypes`                                                                 |
+| `msilib`      | `msidb`, `python-msi`                                                       |
+| `nis`         | `nslcd`, system LDAP config                                                 |
+| `nntplib`     | `imaplib`, `smtplib`, or custom NNTP client                                 |
+| `ossaudiodev` | `pygame`, `sounddevice`                                                     |
+| `pipes`       | `subprocess`                                                                |
+| `sndhdr`      | `filetype`, `puremagic`                                                     |
+| `spwd`        | `python-pam`, system PAM config                                             |
+| `sunau`       | `wave`, `aifc`                                                              |
+| `telnetlib`   | `telnetlib3`, `Exscript`                                                    |
+| `uu`          | `binascii` (but note `binascii` functions were also deprecated — see below) |
+| `xdrlib`      | `xmlrpc.client`, `xdr` third-party libs                                     |
 
 ### Note on `uu` and `binascii`
 
@@ -198,10 +198,12 @@ This is the critical distinction that many LLMs get wrong, especially about the 
 ### Formal Specification (PEP 742)
 
 For a function `def f(x: A) -> TypeIs[B]`:
+
 - **Positive branch** (condition is True): type is narrowed to `A ∧ B` (intersection)
 - **Negative branch** (condition is False): type is narrowed to `A ∧ ¬B` (exclusion)
 
 For `TypeGuard[B]`:
+
 - **Positive branch**: type is narrowed to exactly `B`
 - **Negative branch**: type is **NOT narrowed at all** — it stays as `A`
 
@@ -321,12 +323,12 @@ except ZeroDivisionError:
 
 ### `__type_params__` Attribute Structure
 
-| Object | `.__type_params__` contains |
-|--------|------------------------------|
-| `class Foo[T]:` | `(T,)` — a tuple of `TypeVar` (or `ParamSpec`/`TypeVarTuple`) |
-| `def func[T](...):` | `(T,)` |
-| `type Alias = ...` | `()` — non-generic aliases have empty `__type_params__` |
-| `type Alias[T] = ...` | `(T,)` |
+| Object                | `.__type_params__` contains                                   |
+| --------------------- | ------------------------------------------------------------- |
+| `class Foo[T]:`       | `(T,)` — a tuple of `TypeVar` (or `ParamSpec`/`TypeVarTuple`) |
+| `def func[T](...):`   | `(T,)`                                                        |
+| `type Alias = ...`    | `()` — non-generic aliases have empty `__type_params__`       |
+| `type Alias[T] = ...` | `(T,)`                                                        |
 
 ### WRONG ANSWERS TO AVOID
 
@@ -532,16 +534,16 @@ build supports the GIL being disabled.
 
 ## Quick Reference: Common LLM Mistakes This Skill Prevents
 
-| Topic | Common LLM Mistake | Correct Fact |
-|-------|-------------------|--------------|
-| PEP 695 | "TypeVars from `class Foo[T]:` don't exist at runtime" | They exist via `.__type_params__` |
-| PEP 695 | "Use `__type_variables__`" | It's `__type_params__` only |
-| PEP 667 | "Old behavior was mutations propagated back" | That was always undefined |
-| PEP 667 | "Free-threaded builds are the default" | No — default build always has GIL |
-| PEP 594 | Listing 20+ modules | Exactly 19 modules removed |
-| PEP 594 | Including `asyncore`/`smtpd` in 3.13 list | Those were removed in 3.12 |
-| TypeIs | "TypeIs only narrows in positive branch" | Both branches narrow |
-| TypeGuard | "TypeGuard narrows in negative branch" | No narrowing in else |
-| PEP 696 | "TypeVar with default can follow TypeVarTuple" | Not allowed |
-| PEP 696 | "`TypeVar(default=None).__default__` is `None`" | It's `NoneType` |
-| `locals()` | "Module-level `locals()` behavior changed" | Unchanged |
+| Topic      | Common LLM Mistake                                     | Correct Fact                      |
+| ---------- | ------------------------------------------------------ | --------------------------------- |
+| PEP 695    | "TypeVars from `class Foo[T]:` don't exist at runtime" | They exist via `.__type_params__` |
+| PEP 695    | "Use `__type_variables__`"                             | It's `__type_params__` only       |
+| PEP 667    | "Old behavior was mutations propagated back"           | That was always undefined         |
+| PEP 667    | "Free-threaded builds are the default"                 | No — default build always has GIL |
+| PEP 594    | Listing 20+ modules                                    | Exactly 19 modules removed        |
+| PEP 594    | Including `asyncore`/`smtpd` in 3.13 list              | Those were removed in 3.12        |
+| TypeIs     | "TypeIs only narrows in positive branch"               | Both branches narrow              |
+| TypeGuard  | "TypeGuard narrows in negative branch"                 | No narrowing in else              |
+| PEP 696    | "TypeVar with default can follow TypeVarTuple"         | Not allowed                       |
+| PEP 696    | "`TypeVar(default=None).__default__` is `None`"        | It's `NoneType`                   |
+| `locals()` | "Module-level `locals()` behavior changed"             | Unchanged                         |

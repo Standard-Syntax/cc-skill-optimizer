@@ -65,3 +65,5 @@ outputs/
 .grepai/
 opencode.json
 opencode.json.bak.*
+
+*.bak

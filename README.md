@@ -16,7 +16,7 @@ Optimized SKILL.md / CLAUDE.md / AGENTS.md
 Better future sessions → more data → continuous loop
 ```
 
-GEPA (Genetic-Pareto) uses Reflective Text Evolution: instead of just knowing *that* a session failed, it reads the full execution trace — error messages, tool sequences, duration, compaction events — to diagnose *why*, then proposes targeted fixes. **55% → 82% resolve rate** on Jinja, **79.3% → 100%** on Bleve with Claude Code Haiku (per the gskill paper).
+GEPA (Genetic-Pareto) uses Reflective Text Evolution: instead of just knowing _that_ a session failed, it reads the full execution trace — error messages, tool sequences, duration, compaction events — to diagnose _why_, then proposes targeted fixes. **55% → 82% resolve rate** on Jinja, **79.3% → 100%** on Bleve with Claude Code Haiku (per the gskill paper).
 
 ---
 
@@ -54,6 +54,7 @@ uv run python optimize.py \
 ```
 
 **Phases:**
+
 - `--phase 1` (default): Synthetic exploration mode, 100 evals, 4-thread parallel evaluation
 - `--phase 2`: Session-backed refinement, 60 evals, requires existing session logs
 - `--hybrid-frontier`: When set, enables multi-objective Pareto frontier (tracks outcome, efficiency, cache_efficiency, low_error_rate)
@@ -103,6 +104,7 @@ uv run python optimize.py \
 ```
 
 **DSPy backends:**
+
 - `--dspy-backend mipro` (default): Legacy `dspy.MIPROv2` path — backward compatible
 - `--dspy-backend native-gepa`: New in Phase 11 — uses `dspy.GEPA` (dspy 3.0+ native multi-objective optimizer) with reflective feedback
 
@@ -146,6 +148,7 @@ uv run python optimize.py \
 ```
 
 **How section optimization works:**
+
 - Parses the file into sections by `## ` heading (configurable with `--section-depth`)
 - Each section becomes its own GEPA component — evolved independently
 - Subsections (`###`) nest under their parent `##` heading
@@ -175,6 +178,7 @@ uv run python optimize.py \
 ```
 
 **How nested file optimization works:**
+
 - Discovers all `CLAUDE.md`, `AGENTS.md`, and `SKILL.md` files recursively from `--nested-root`
 - Each file becomes an independent GEPA component (e.g., `src/CLAUDE.md`, `test/CLAUDE.md`)
 - Root file is optimized for project-wide context (architecture, global conventions)
@@ -183,6 +187,7 @@ uv run python optimize.py \
 - Directory structure is preserved in output (`outputs/nested/CLAUDE.md`, `outputs/nested/src/CLAUDE.md`)
 
 **Why nested files?**
+
 - Claude Code loads the root `CLAUDE.md` always
 - When working in `src/`, it also loads `src/CLAUDE.md` for focused guidance
 - This reduces context waste — agents only see relevant rules
@@ -195,16 +200,19 @@ uv run python optimize.py \
 ### Session Log Parsing (`src/parse_session.py`)
 
 Claude Code writes every session to:
+
 ```
 ~/.claude/projects/<project-slug>/<session-id>.jsonl
 ~/.claude/projects/<project-slug>/subagents/<agent-id>.jsonl
 ```
 
 Each JSONL line is one of:
+
 - `{"type": "user", ...}` — your message or tool results
 - `{"type": "assistant", ...}` — Claude's response + tool calls + token usage
 
 `parse_session.py` extracts per-episode:
+
 - **task_prompt**: the first real user message
 - **tool_calls**: every Bash/Read/Write/Edit call with input+result+success
 - **error_messages**: stderr/error fields from failed tool results
@@ -222,11 +230,13 @@ Each JSONL line is one of:
 Two scoring modes:
 
 **Heuristic scoring (default, free)**:
+
 - Base: outcome signal (success=1.0, error=0.0, unknown=0.5)
 - neutral_closing bonus: unknown outcome + no errors + files written = ~0.7 (higher-confidence completion)
 - Efficiency bonus: fewer tool calls + shorter duration = +0.15 max
 
 **LLM judge scoring (--use-llm-judge)**:
+
 - An LLM reads the candidate skill + episode trace
 - Scores 0-1 how much the skill would have helped
 - Weighted 65% LLM + 35% heuristic by default (was 40%/60%)
@@ -235,6 +245,7 @@ Two scoring modes:
 ### GEPA Optimization (`optimize.py`)
 
 Uses `gepa.optimize_anything` (Generalization mode):
+
 1. **Select** candidate from Pareto frontier (best at different episode subsets)
 2. **Execute** evaluator on a minibatch → get (score, ASI)
 3. **Reflect** — reflection LM reads the ASI traces and diagnoses why sessions failed
@@ -244,6 +255,7 @@ Uses `gepa.optimize_anything` (Generalization mode):
 **Parallel evaluation** is enabled by default (4 threads for GEPA, 4 workers for evaluator batch). Phase 1 uses synthetic exploration, Phase 2 uses session-backed refinement.
 
 The ASI passed to the reflection LM includes:
+
 - Task prompt
 - Outcome + duration
 - All error messages
@@ -254,7 +266,8 @@ The ASI passed to the reflection LM includes:
 
 ### Actionable Side Information (ASI)
 
-The key GEPA concept: instead of just a score, the evaluator returns diagnostic text that tells the reflection LM *why* a session failed. For Claude Code:
+The key GEPA concept: instead of just a score, the evaluator returns diagnostic text that tells the reflection LM _why_ a session failed. For Claude Code:
+
 - "EACCES: permission denied" → skill should warn about permission issues
 - "ModuleNotFoundError: litellm" → skill should specify `uv run`
 - Context compaction triggered → skill is too verbose, sessions run long
@@ -286,22 +299,22 @@ litellm handles routing — use any model string it supports.
 
 ### Recommended LM combinations
 
-| Use case | task_lm | reflection_lm | cost |
-|----------|---------|---------------|------|
-| Fast iteration | `minimax/minimax-m2.7-highspeed` | `minimax/minimax-m3` | Low |
-| High quality | `minimax/minimax-m3` | `minimax/minimax-m3` | High |
-| Cheap reflection | `minimax/minimax-m2.7-highspeed` | `minimax/minimax-m2.7-highspeed` | Very low |
-| Skill generation (M2.7) | `minimax/minimax-m2.7` | `minimax/minimax-m3` | Very low ($0.30/M) |
+| Use case                | task_lm                          | reflection_lm                    | cost               |
+| ----------------------- | -------------------------------- | -------------------------------- | ------------------ |
+| Fast iteration          | `minimax/minimax-m2.7-highspeed` | `minimax/minimax-m3`             | Low                |
+| High quality            | `minimax/minimax-m3`             | `minimax/minimax-m3`             | High               |
+| Cheap reflection        | `minimax/minimax-m2.7-highspeed` | `minimax/minimax-m2.7-highspeed` | Very low           |
+| Skill generation (M2.7) | `minimax/minimax-m2.7`           | `minimax/minimax-m3`             | Very low ($0.30/M) |
 
 > **MiniMax M2.7** excels at skill generation tasks requiring high adherence (97%) with low hallucination (34%), but is verbose (4× average tokens) and slow (~50 tps). Use M2.7-highspeed for eval/judge calls — never route high-throughput eval traffic through M2.7.
 
 ### GEPA budget guidance
 
-| Corpus size | Recommended --max-evals | Expected runtime |
-|-------------|------------------------|------------------|
-| 20–50 episodes | 60–100 | 10–20 min |
-| 50–150 episodes | 100–200 | 20–45 min |
-| 150+ episodes | 200–400 | 1–2 hr |
+| Corpus size     | Recommended --max-evals | Expected runtime |
+| --------------- | ----------------------- | ---------------- |
+| 20–50 episodes  | 60–100                  | 10–20 min        |
+| 50–150 episodes | 100–200                 | 20–45 min        |
+| 150+ episodes   | 200–400                 | 1–2 hr           |
 
 ---
 
@@ -386,6 +399,7 @@ def my_evaluate(candidate: str, example: dict) -> tuple[float, dict]:
 ### Phase 4-7 Improvements (2026-06-03)
 
 **Phase 4: GEPA signal-quality fixes**
+
 - `oa.log()` wired as primary ASI channel — 6 diagnostic calls (outcome, duration, errors, tool calls, compaction, judge score) flow to reflection LM
 - `--max-evals` CLI override now works (was silently ignored)
 - M2.7 judge detection (case-insensitive substring dispatch when `judge_lm` contains "m2.7")
@@ -393,16 +407,19 @@ def my_evaluate(candidate: str, example: dict) -> tuple[float, dict]:
 - Thinking model guard prevents temperature+thinking conflicts
 
 **Phase 5: Scoring rubric alignment**
+
 - `_cache_bonus` removed from score formula → exposed via `side_info["cache_ratio"]` (indicates session input structure, not skill quality)
 - DSPy MIPROv2 instruction extraction — optimized instructions + few-shot demos injected into output
 - Judge weight standardized to 0.65 in both `make_replay_evaluator` and `make_synthetic_evaluator`
 
 **Phase 6: Data ingestion reliability**
+
 - Subagent JSONL scanning — now scans both `project_dir/*.jsonl` and `project_dir/subagents/agent-*.jsonl`
 - Two-poll size stability — mtime replaced with size tracking across polls (handles long thinking pauses)
 - `skip_paths` parameter for cumulative dedup across watch sessions
 
 **Phase 7: Module hygiene**
+
 - Section parser whitespace stripping — `lstrip('\n')` prevents round-trip accumulation
 - Heading de-collision — `_make_unique_key()` adds `_2`, `_3` suffixes for collisions
 - Explicit `llm_config.configure()` — module no longer runs as side effect
@@ -421,6 +438,7 @@ def my_evaluate(candidate: str, example: dict) -> tuple[float, dict]:
 - **Section parser idempotency**: `_heading_<key>` metadata enables round-trip across GEPA iterations
 
 **Bug fixes (27 issues across 7 source files):**
+
 - token_stats double-counting deduplicated by message.id
 - multi-evaluator temp dir scoping corrected
 - NESTED_ROOT now fetched from CLI arg (was hardcoded)

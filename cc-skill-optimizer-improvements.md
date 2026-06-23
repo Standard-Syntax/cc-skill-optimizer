@@ -2,7 +2,7 @@
 
 > Excludes model/provider changes. Ordered by expected impact.
 
------
+---
 
 ## 1. Wire `neutral_closing` into `_outcome_score()`
 
@@ -39,7 +39,7 @@ def _outcome_score(episode: dict) -> float:
     }.get(outcome, 0.5)
 ```
 
------
+---
 
 ## 2. Fix the train/val split for small corpora
 
@@ -72,7 +72,7 @@ Also expose `--test-frac 0` as a CLI flag, or remove the unused test split entir
 
 > **Reference:** GEPA FAQ — “We typically recommend calling GEPA with at least 15–30× len(valset) metric calls to allow it to propose and evaluate up to 15 new candidates.”
 
------
+---
 
 ## 3. Raise and reorder the ASI episode truncation
 
@@ -114,7 +114,7 @@ def episode_to_asi(ep: dict) -> str:
     # ... bash commands, files, token stats, tool sequence after
 ```
 
------
+---
 
 ## 4. Score all components in `make_multi_evaluator` and `make_nested_evaluator`
 
@@ -158,7 +158,7 @@ for key, text in candidate.items():
 side_info["scores"] = component_scores  # gepa reads side_info["scores"] for frontier_type="hybrid"
 ```
 
------
+---
 
 ## 5. Extract shared DSPy infrastructure; document the DSPy path limitation
 
@@ -228,7 +228,7 @@ def _ideal_completion_from_episode(ep: dict) -> str:
 
 Also add a prominent docstring to `run_dspy_gepa()` noting that it extracts DSPy’s internal `signature.instructions` field, not a SKILL.md — so the output format differs from GEPA’s `optimize_anything` path.
 
------
+---
 
 ## 6. Add a length-constrained custom proposer
 
@@ -245,7 +245,7 @@ def make_length_constrained_proposer(max_chars: int = 2000):
     Returns a custom GEPA proposer that injects a character-limit constraint
     into the reflection prompt. Prevents prompt bloat from accumulating across
     iterations — the single largest overfitting risk in long optimization runs.
-    
+
     Reference: Decagon ablation study (March 2026) — 1,500-char constraint
     achieved 4× compression, -0.8% performance, +generalization.
     """
@@ -272,7 +272,7 @@ def make_length_constrained_proposer(max_chars: int = 2000):
 
 Wire it in via `ReflectionConfig(custom_candidate_proposer=make_length_constrained_proposer())` and expose `--max-skill-chars` as a CLI flag (default: `2000`, matching the 2000-token SKILL.md target).
 
------
+---
 
 ## 7. Add warm-restart seeding to `watch_and_learn.py`
 
@@ -303,7 +303,7 @@ seed = _get_warm_seed(output_dir, args.target, original_seed)
 
 This is especially valuable when corpus growth is slow (1–2 new sessions per day) and the marginal improvement per run is small. Starting from the previous best means GEPA refines rather than rediscovers.
 
------
+---
 
 ## 8. Fix `generate_tasks_for_domain()` token budget
 
@@ -340,7 +340,7 @@ if isinstance(tasks, list) and len(tasks) < n:
     )
 ```
 
------
+---
 
 ## 9. Enrich `_JUDGE_SYSTEM` with SKILL.md format constraints
 
@@ -373,7 +373,7 @@ _JUDGE_SYSTEM = (
 "repeat information the agent would already know.\n\n"
 ```
 
------
+---
 
 ## 10. Tune `structural_score()` length bounds and specificity density
 
@@ -403,19 +403,19 @@ specificity_density = specificity_hits / word_count * 100   # hits per 100 words
 specificity_score = min(0.20, specificity_density * 0.05)   # tune the multiplier
 ```
 
------
+---
 
 ## Summary
 
-|# |Change                                             |File                                             |Impact           |
-|--|---------------------------------------------------|-------------------------------------------------|-----------------|
-|1 |Wire `neutral_closing` into `_outcome_score()`     |`src/evaluator.py`                               |🔴 Bug fix        |
-|2 |Change default train/val split to 80/20            |`optimize.py`                                    |🔴 Accuracy       |
-|3 |Raise ASI cap to 4,000; reorder `episode_to_asi()` |`src/evaluator.py`, `src/parse_session.py`       |🟠 Quality        |
-|4 |Score all components in multi/nested evaluators    |`optimize.py`                                    |🟠 Accuracy       |
-|5 |Extract shared DSPy code; document DSPy path limits|`optimize.py`, new `src/dspy_shared.py`          |🟠 Maintainability|
-|6 |Add length-constrained custom proposer             |`optimize.py`                                    |🟡 Quality        |
-|7 |Warm-restart seeding in `watch_and_learn.py`       |`watch_and_learn.py`                             |🟡 Efficiency     |
-|8 |Dedicate `TASK_GEN_MAX_TOKENS`; warn on truncation |`src/synthetic_evaluator.py`, `src/llm_config.py`|🟡 Correctness    |
-|9 |Add format rubric to `_JUDGE_SYSTEM`               |`src/evaluator.py`                               |🟡 Quality        |
-|10|Tune `structural_score()` length bounds and density|`src/synthetic_evaluator.py`                     |🟡 Accuracy       |
+| #   | Change                                              | File                                              | Impact             |
+| --- | --------------------------------------------------- | ------------------------------------------------- | ------------------ |
+| 1   | Wire `neutral_closing` into `_outcome_score()`      | `src/evaluator.py`                                | 🔴 Bug fix         |
+| 2   | Change default train/val split to 80/20             | `optimize.py`                                     | 🔴 Accuracy        |
+| 3   | Raise ASI cap to 4,000; reorder `episode_to_asi()`  | `src/evaluator.py`, `src/parse_session.py`        | 🟠 Quality         |
+| 4   | Score all components in multi/nested evaluators     | `optimize.py`                                     | 🟠 Accuracy        |
+| 5   | Extract shared DSPy code; document DSPy path limits | `optimize.py`, new `src/dspy_shared.py`           | 🟠 Maintainability |
+| 6   | Add length-constrained custom proposer              | `optimize.py`                                     | 🟡 Quality         |
+| 7   | Warm-restart seeding in `watch_and_learn.py`        | `watch_and_learn.py`                              | 🟡 Efficiency      |
+| 8   | Dedicate `TASK_GEN_MAX_TOKENS`; warn on truncation  | `src/synthetic_evaluator.py`, `src/llm_config.py` | 🟡 Correctness     |
+| 9   | Add format rubric to `_JUDGE_SYSTEM`                | `src/evaluator.py`                                | 🟡 Quality         |
+| 10  | Tune `structural_score()` length bounds and density | `src/synthetic_evaluator.py`                      | 🟡 Accuracy        |

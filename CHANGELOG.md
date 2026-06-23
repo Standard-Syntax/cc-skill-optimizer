@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - **Phases 15-18: 10 improvements from cc-skill-optimizer-improvements.md** (2026-06-04)
   - **15.1**: Wire `neutral_closing` into `_outcome_score()` — unknown-outcome episodes with files written and no errors now score 0.7 instead of 0.5 (was a silent accuracy regression).
   - **15.2**: Change `split_corpus()` default to 80/20/0 — matches the GEPA FAQ recommendation; legacy 70/20/10 wasted 10% of every corpus on a test slice that was never used. New `--test-frac 0.0` flag preserves backward compatibility.
@@ -32,10 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 27 new tests across 3 new test files; 84/84 dspy-related tests pass (57 pre-existing + 27 new); `ruff check .` reports 0 errors.
 
 ### Changed
+
 - `split_corpus()` function gained a new `test_frac` parameter (default 0.0); old 4-arg positional callers (without test_frac) will fail with TypeError — the only such caller was already updated in `main()`.
 - MIPROv2 metric return type changed from `float` to `dspy.Prediction(score, feedback)` for dspy 3.x `GEPAFeedbackMetric` contract compatibility.
 
 ### Migration
+
 - No breaking changes; all new CLI flags have default values matching prior behavior.
 
 - **Phase 12: Test surface + Final QA** (2026-06-03)
@@ -86,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `neutral_closing` field in episode dict — scores unknown outcomes with files written at ~0.7
 
 ### Changed
+
 - **GEPA reflection feedback**: Evaluators now populate `side_info["feedback"]` with natural-language diagnostic strings instead of just numeric scores. Reflection LM receives actionable feedback (e.g., "EACCES: permission denied" → "skill should warn about permission issues")
 - **EngineConfig parallel**: Set to `True` by default (4 threads), reducing wall time 4-8x
 - **Conservative outcome inference**: Ambiguous sessions now score 0.5 (was 1.0). Uses `POSITIVE_COMPLETION_SIGNALS` for safer inference
@@ -100,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Size stability check**: Two-poll size tracking replaces mtime guard for file stability
 
 ### Fixed
+
 - token_stats double-counting in `parse_session.py` (deduplicates by message.id)
 - multi-evaluator temp dir scoping in `optimize.py`
 - NESTED_ROOT hardcoding issue in `optimize.py` (now from CLI arg)
@@ -112,6 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nested evaluator prefers root keys (no `/`) over nested
 
 ### Removed
+
 - MIPROv2 docstring references (replaced with direct GEPA configuration)
 - `_cache_bonus` from score formula (exposed via `side_info["cache_ratio"]` instead)
 
@@ -120,10 +126,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-06-03
 
 ### Added
+
 - Phase 1 code review remediation (27 issues fixed across 7 source files)
 - 102/102 tests pass; zero regressions
 
 ### Changed
+
 - All Phase 1 features merged from unreleased (see [Unreleased] above)
 
 ---
@@ -131,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2025-12-XX
 
 ### Added
+
 - Initial release of cc-skill-optimizer
 - GEPA prompt optimization with Reflective Text Evolution
 - Section parser for within-file optimization
